@@ -47,30 +47,32 @@ export class GamePhysics {
     
     // Create desk boundary sensors (to detect when pens fall off)
     // These are sensors - they detect collision but don't physically stop objects
+    // Place them further out so pen must be COMPLETELY off the desk
     const wallThickness = 20;
+    const fallOffMargin = 50; // Pen must go this far past edge to count as fallen
     
-    // Create invisible walls just outside desk edges
+    // Create invisible walls outside desk edges (for fall-off detection)
     this.walls = [
       // Top
-      Bodies.rectangle(deskX + deskWidth / 2, deskY - wallThickness / 2, deskWidth + wallThickness * 2, wallThickness, { 
+      Bodies.rectangle(deskX + deskWidth / 2, deskY - wallThickness / 2 - fallOffMargin, deskWidth + wallThickness * 2, wallThickness, { 
         isStatic: true, 
         isSensor: true,
         label: 'wall-top' 
       }),
       // Bottom
-      Bodies.rectangle(deskX + deskWidth / 2, deskY + deskHeight + wallThickness / 2, deskWidth + wallThickness * 2, wallThickness, { 
+      Bodies.rectangle(deskX + deskWidth / 2, deskY + deskHeight + wallThickness / 2 + fallOffMargin, deskWidth + wallThickness * 2, wallThickness, { 
         isStatic: true, 
         isSensor: true,
         label: 'wall-bottom' 
       }),
       // Left
-      Bodies.rectangle(deskX - wallThickness / 2, deskY + deskHeight / 2, wallThickness, deskHeight + wallThickness * 2, { 
+      Bodies.rectangle(deskX - wallThickness / 2 - fallOffMargin, deskY + deskHeight / 2, wallThickness, deskHeight + wallThickness * 2, { 
         isStatic: true, 
         isSensor: true,
         label: 'wall-left' 
       }),
       // Right
-      Bodies.rectangle(deskX + deskWidth + wallThickness / 2, deskY + deskHeight / 2, wallThickness, deskHeight + wallThickness * 2, { 
+      Bodies.rectangle(deskX + deskWidth + wallThickness / 2 + fallOffMargin, deskY + deskHeight / 2, wallThickness, deskHeight + wallThickness * 2, { 
         isStatic: true, 
         isSensor: true,
         label: 'wall-right' 
@@ -226,6 +228,25 @@ export class GamePhysics {
       y: penData.body.position.y,
       angle: penData.body.angle,
     };
+  }
+  
+  // Check if pen center is completely outside the desk bounds
+  isPenOffDesk(isPlayer: boolean): boolean {
+    const penKey = isPlayer ? 'player' : 'ai';
+    const penData = this.penBodies.get(penKey);
+    
+    if (!penData) return false;
+    
+    const pos = penData.body.position;
+    const { deskX, deskY, deskWidth, deskHeight } = this.config;
+    const margin = 40; // Pen must be this far outside to count as "off"
+    
+    return (
+      pos.x < deskX - margin ||
+      pos.x > deskX + deskWidth + margin ||
+      pos.y < deskY - margin ||
+      pos.y > deskY + deskHeight + margin
+    );
   }
   
   arePensSettled(): boolean {

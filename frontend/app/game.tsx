@@ -138,12 +138,7 @@ export default function GameScreen() {
 
     physicsRef.current.initialize(playerPen, aiPen, obstacles, capOn);
 
-    physicsRef.current.setOnPenFallOff((isPlayer: boolean) => {
-      if (!penFellRef.current) {
-        penFellRef.current = true;
-        handlePenFallOff(isPlayer);
-      }
-    });
+    // Note: We now check pen positions in the game loop instead of collision detection
 
     return () => {
       if (gameLoopRef.current) {
@@ -171,10 +166,23 @@ export default function GameScreen() {
     if (newPlayerPos) setPlayerPos(newPlayerPos);
     if (newAiPos) setAiPos(newAiPos);
 
+    // Check if either pen has completely fallen off the desk
+    if (!penFellRef.current && !showResult) {
+      if (physicsRef.current.isPenOffDesk(true)) {
+        // Player pen fell off
+        penFellRef.current = true;
+        handlePenFallOff(true);
+      } else if (physicsRef.current.isPenOffDesk(false)) {
+        // AI pen fell off
+        penFellRef.current = true;
+        handlePenFallOff(false);
+      }
+    }
+
     // Check if pens have settled
-    if (isAnimating && physicsRef.current.arePensSettled()) {
+    if (isAnimating && physicsRef.current.arePensSettled() && !penFellRef.current) {
       setIsAnimating(false);
-      if (!showResult && !penFellRef.current) {
+      if (!showResult) {
         toggleTurn();
       }
     }
@@ -343,12 +351,6 @@ export default function GameScreen() {
       },
       
       onPanResponderRelease: (evt) => {
-        if (!physicsRef.current) {
-          setIsAiming(false);
-          setPower(0);
-          return;
-        }
-
         const touch = evt.nativeEvent;
         
         // Use refs for start position and hit point
@@ -361,11 +363,17 @@ export default function GameScreen() {
         const dy = startY - touch.pageY;
         const distance = Math.sqrt(dx * dx + dy * dy);
         
-        if (distance < 25) {
-          // Too short, cancel
+        // If very short drag, just cancel - let user try again
+        if (distance < 30) {
           setIsAiming(false);
           setPower(0);
-          setMessage('Pull further to flick!');
+          setMessage('Tap cancelled. Try dragging further to flick!');
+          return;
+        }
+        
+        if (!physicsRef.current) {
+          setIsAiming(false);
+          setPower(0);
           return;
         }
         
