@@ -166,14 +166,21 @@ export default function GameScreen() {
     if (newPlayerPos) setPlayerPos(newPlayerPos);
     if (newAiPos) setAiPos(newAiPos);
 
-    // Check if either pen has completely fallen off the desk
+    // Check if either pen has fallen off the desk
     if (!penFellRef.current && !showResult) {
-      if (physicsRef.current.isPenOffDesk(true)) {
-        // Player pen fell off
+      const playerOff = physicsRef.current.isPenOffDesk(true);
+      const aiOff = physicsRef.current.isPenOffDesk(false);
+      
+      if (playerOff && aiOff) {
+        // DRAW - both pens fell off
+        penFellRef.current = true;
+        handleDraw();
+      } else if (playerOff) {
+        // Player pen fell off - AI scores
         penFellRef.current = true;
         handlePenFallOff(true);
-      } else if (physicsRef.current.isPenOffDesk(false)) {
-        // AI pen fell off
+      } else if (aiOff) {
+        // AI pen fell off - Player scores
         penFellRef.current = true;
         handlePenFallOff(false);
       }
@@ -231,6 +238,14 @@ export default function GameScreen() {
     setMessage('AI flicks!');
     physicsRef.current.flickPen(false, decision.hitPoint, decision.force, decision.power);
     setIsAnimating(true);
+  };
+
+  // Handle draw - both pens fell off
+  const handleDraw = () => {
+    setIsAnimating(false);
+    setRoundWinner(null);
+    setMessage('DRAW! Both pens fell off - no points!');
+    setShowResult(true);
   };
 
   const handlePenFallOff = (isPlayer: boolean) => {
@@ -299,41 +314,33 @@ export default function GameScreen() {
     
     // Check if within pen bounds (with some padding for easier touch)
     const penHalfLength = (PEN_LENGTH / 2) + 15; // +15 for cap
-    const penHalfWidth = (PEN_WIDTH / 2) + 8; // Small padding for easier touch
+    const penHalfWidth = (PEN_WIDTH / 2) + 10; // Padding for easier touch
     
     return Math.abs(alongPen) <= penHalfLength && Math.abs(acrossPen) <= penHalfWidth;
   };
 
-  // Calculate where on the pen body was touched (for spin calculation)
-  // Returns the exact point on the pen surface
-  const calculateHitPoint = (touchX: number, touchY: number) => {
+  // Get the point on pen surface closest to touch - this is where the flick originates
+  const getHitPointOnPen = (touchX: number, touchY: number) => {
     const penAngle = playerPos.angle;
     const penDirX = Math.cos(penAngle);
     const penDirY = Math.sin(penAngle);
-    const perpX = -penDirY;
-    const perpY = penDirX;
     
+    // Vector from pen center to touch
     const toTouchX = touchX - playerPos.x;
     const toTouchY = touchY - playerPos.y;
     
-    // Position along pen axis
+    // Project onto pen axis to find position along pen
     const alongPen = toTouchX * penDirX + toTouchY * penDirY;
-    // Position across pen (which side)
-    const acrossPen = toTouchX * perpX + toTouchY * perpY;
     
-    // Clamp to pen bounds
-    const clampedAlong = Math.max(-PEN_LENGTH/2, Math.min(PEN_LENGTH/2 + 10, alongPen));
-    const clampedAcross = Math.max(-PEN_WIDTH/2, Math.min(PEN_WIDTH/2, acrossPen));
+    // Clamp to pen length (including cap)
+    const halfLen = PEN_LENGTH / 2 + 10;
+    const clampedAlong = Math.max(-halfLen, Math.min(halfLen, alongPen));
     
-    // Convert back to world coordinates - hit point is ON the pen surface
-    const hitX = playerPos.x + clampedAlong * penDirX + clampedAcross * perpX;
-    const hitY = playerPos.y + clampedAlong * penDirY + clampedAcross * perpY;
-    
+    // The hit point is on the pen's centerline at the clamped position
     return {
-      x: hitX,
-      y: hitY,
-      alongOffset: clampedAlong, // Position along pen (-ve = tip, +ve = cap)
-      acrossOffset: clampedAcross, // Which side of pen
+      x: playerPos.x + clampedAlong * penDirX,
+      y: playerPos.y + clampedAlong * penDirY,
+      alongOffset: clampedAlong,
     };
   };
 
@@ -350,7 +357,7 @@ export default function GameScreen() {
       
       onPanResponderGrant: (evt) => {
         const touch = evt.nativeEvent;
-        const hit = calculateHitPoint(touch.pageX, touch.pageY);
+        const hit = getHitPointOnPen(touch.pageX, touch.pageY);
         
         // Store in refs for closure access
         touchStartRef.current = { x: touch.pageX, y: touch.pageY };
@@ -811,9 +818,14 @@ export default function GameScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.resultModal}>
             <Text style={styles.resultTitle}>
-              {roundWinner === 'player' ? '🎉 You Scored!' : '😔 AI Scored!'}
+              {roundWinner === 'player' ? '🎉 You Scored!' : 
+               roundWinner === 'ai' ? '😔 AI Scored!' : 
+               '🤝 Draw!'}
             </Text>
             <Text style={styles.resultScore}>{playerScore} - {aiScore}</Text>
+            {roundWinner === null && (
+              <Text style={styles.drawText}>Both pens fell off - no points</Text>
+            )}
             <TouchableOpacity style={styles.nextRoundBtn} onPress={handleNextRound}>
               <Text style={styles.nextRoundText}>Next Round</Text>
             </TouchableOpacity>
@@ -1034,7 +1046,13 @@ const styles = StyleSheet.create({
     fontSize: 34,
     fontWeight: 'bold',
     color: '#e94560',
+    marginBottom: 10,
+  },
+  drawText: {
+    fontSize: 14,
+    color: '#AAA',
     marginBottom: 20,
+    textAlign: 'center',
   },
   nextRoundBtn: {
     backgroundColor: '#22C55E',
