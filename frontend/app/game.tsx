@@ -115,6 +115,7 @@ export default function GameScreen() {
   const [refillActive, setRefillActive] = useState(false);
   const [obstacles] = useState<Obstacle[]>(generateObstacles());
   const [message, setMessage] = useState('');
+  const [roundStarter, setRoundStarter] = useState<'player' | 'ai'>('player'); // Track who starts each round
 
   // Refs
   const physicsRef = useRef<GamePhysics | null>(null);
@@ -279,7 +280,6 @@ export default function GameScreen() {
 
   const handleNextRound = () => {
     setShowResult(false);
-    setRoundWinner(null);
     setRefillActive(false);
     penFellRef.current = false;
     
@@ -287,10 +287,28 @@ export default function GameScreen() {
     setPlayerPos(initialPlayerPos);
     setAiPos(initialAiPos);
     
-    if (!useGameStore.getState().isPlayerTurn) {
+    // Alternate starting player: loser of last round starts next
+    // If it was a draw, keep the same starter
+    let nextStarter: 'player' | 'ai' = roundStarter;
+    if (roundWinner === 'player') {
+      nextStarter = 'ai'; // Player won, so AI starts next
+    } else if (roundWinner === 'ai') {
+      nextStarter = 'player'; // AI won, so Player starts next
+    }
+    // If draw (roundWinner === null), keep same starter
+    
+    setRoundStarter(nextStarter);
+    setRoundWinner(null);
+    
+    // Set the turn based on who should start
+    const currentTurn = useGameStore.getState().isPlayerTurn;
+    if (nextStarter === 'player' && !currentTurn) {
+      toggleTurn();
+    } else if (nextStarter === 'ai' && currentTurn) {
       toggleTurn();
     }
-    setMessage('New round! Your turn');
+    
+    setMessage(nextStarter === 'player' ? 'New round! Your turn' : 'New round! AI starts');
   };
 
   // Check if touch is actually ON the pen body (not just near it)
