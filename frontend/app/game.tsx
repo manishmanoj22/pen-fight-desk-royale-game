@@ -38,16 +38,15 @@ const randomInRange = (min: number, max: number) => Math.random() * (max - min) 
 const generateObstacles = (): Obstacle[] => {
   const obstacles: Obstacle[] = [];
   
-  // CENTER BARRIER - prevents instant knockouts
-  // This is a ruler/scale placed in the middle
+  // CENTER BARRIER - smaller ruler to slow down but not block completely
   obstacles.push({
     id: 'center-ruler',
     type: 'geometryBox',
-    x: DESK_X + DESK_WIDTH / 2 - 45,
-    y: DESK_Y + DESK_HEIGHT / 2 - 12,
-    width: 90,
-    height: 24,
-    rotation: randomInRange(-5, 5),
+    x: DESK_X + DESK_WIDTH / 2 - 30,
+    y: DESK_Y + DESK_HEIGHT / 2 - 8,
+    width: 60,
+    height: 16,
+    rotation: randomInRange(-8, 8),
   });
   
   // Geometry box - random position in top half
@@ -798,8 +797,8 @@ export default function GameScreen() {
                   <Line x1={obs.x + 2} y1={obs.y + obs.height * 0.35} x2={obs.x + obs.width - 2} y2={obs.y + obs.height * 0.35} stroke="rgba(0,0,0,0.3)" strokeWidth={1} />
                   {/* Label area */}
                   <Rect x={obs.x + 5} y={obs.y + 4} width={obs.width - 10} height={8} fill="#FFFEF0" rx={1} />
-                  {/* Brand text */}
-                  <SvgText x={obs.x + obs.width/2} y={obs.y + 10} fill="#1E40AF" fontSize={5} textAnchor="middle" fontWeight="bold">CAMLIN</SvgText>
+                  {/* Label decoration (no brand) */}
+                  <Line x1={obs.x + 8} y1={obs.y + 8} x2={obs.x + obs.width - 8} y2={obs.y + 8} stroke="rgba(30, 64, 175, 0.3)" strokeWidth={0.5} />
                   {/* Metallic clasp */}
                   <Rect x={obs.x + obs.width/2 - 4} y={obs.y + obs.height - 6} width={8} height={4} fill="url(#metallicSilver)" rx={1} />
                   {/* Edge highlight */}
@@ -844,8 +843,8 @@ export default function GameScreen() {
                   <Rect x={obs.x} y={obs.y} width={obs.width} height={obs.height} fill="url(#eraserGrad)" rx={2} />
                   {/* Paper sleeve */}
                   <Rect x={obs.x + 2} y={obs.y + 2} width={obs.width - 4} height={obs.height - 4} fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth={0.5} rx={1} />
-                  {/* Brand marking */}
-                  <SvgText x={cx} y={cy + 1} fill="rgba(255,255,255,0.7)" fontSize={4} textAnchor="middle">APSARA</SvgText>
+                  {/* Simple marking line (no brand) */}
+                  <Line x1={obs.x + 4} y1={cy} x2={obs.x + obs.width - 4} y2={cy} stroke="rgba(255,255,255,0.5)" strokeWidth={0.5} />
                   {/* Used edge - darker */}
                   <Rect x={obs.x} y={obs.y} width={4} height={obs.height} fill="rgba(0,0,0,0.15)" rx={2} />
                 </G>
