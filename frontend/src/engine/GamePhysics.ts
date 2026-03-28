@@ -125,7 +125,7 @@ export class GamePhysics {
     
     World.add(this.engine.world, [playerBody, aiBody]);
     
-    // Create obstacles
+    // Create obstacles - these are SOLID bodies pens will bounce off
     obstacles.forEach((obstacle) => {
       const obstacleBody = Bodies.rectangle(
         obstacle.x + obstacle.width / 2,
@@ -134,8 +134,8 @@ export class GamePhysics {
         obstacle.height,
         {
           isStatic: true,
-          friction: 0.3,
-          restitution: 0.4,
+          friction: 0.5,
+          restitution: 0.7, // Good bounce
           angle: (obstacle.rotation * Math.PI) / 180,
           label: `obstacle-${obstacle.id}`,
         }
@@ -144,6 +144,8 @@ export class GamePhysics {
     });
     
     World.add(this.engine.world, this.obstacleBodies);
+    
+    // Note: No edge walls - pens can fall off the desk (that's the win condition)
   }
   
   private handleCollision(event: Matter.IEventCollision<Matter.Engine>) {

@@ -294,17 +294,22 @@ export default function GameScreen() {
   };
 
   // Check if touch is actually ON the pen body (not just near it)
+  // Uses CURRENT physics position, not React state
   const isTouchOnPen = (touchX: number, touchY: number) => {
+    // Get current position from physics engine
+    const currentPos = physicsRef.current?.getPenPosition(true);
+    if (!currentPos) return false;
+    
     // Transform touch point to pen's local coordinate system
-    const penAngle = playerPos.angle;
+    const penAngle = currentPos.angle;
     const penDirX = Math.cos(penAngle);
     const penDirY = Math.sin(penAngle);
     const perpX = -penDirY; // Perpendicular to pen axis
     const perpY = penDirX;
     
     // Vector from pen center to touch
-    const toTouchX = touchX - playerPos.x;
-    const toTouchY = touchY - playerPos.y;
+    const toTouchX = touchX - currentPos.x;
+    const toTouchY = touchY - currentPos.y;
     
     // Project onto pen axis (along the length)
     const alongPen = toTouchX * penDirX + toTouchY * penDirY;
@@ -319,15 +324,19 @@ export default function GameScreen() {
     return Math.abs(alongPen) <= penHalfLength && Math.abs(acrossPen) <= penHalfWidth;
   };
 
-  // Get the point on pen surface closest to touch - this is where the flick originates
+  // Get the point on pen surface closest to touch - uses CURRENT physics position
   const getHitPointOnPen = (touchX: number, touchY: number) => {
-    const penAngle = playerPos.angle;
+    // Get current position from physics engine
+    const currentPos = physicsRef.current?.getPenPosition(true);
+    if (!currentPos) return { x: touchX, y: touchY, alongOffset: 0 };
+    
+    const penAngle = currentPos.angle;
     const penDirX = Math.cos(penAngle);
     const penDirY = Math.sin(penAngle);
     
     // Vector from pen center to touch
-    const toTouchX = touchX - playerPos.x;
-    const toTouchY = touchY - playerPos.y;
+    const toTouchX = touchX - currentPos.x;
+    const toTouchY = touchY - currentPos.y;
     
     // Project onto pen axis to find position along pen
     const alongPen = toTouchX * penDirX + toTouchY * penDirY;
@@ -338,8 +347,8 @@ export default function GameScreen() {
     
     // The hit point is on the pen's centerline at the clamped position
     return {
-      x: playerPos.x + clampedAlong * penDirX,
-      y: playerPos.y + clampedAlong * penDirY,
+      x: currentPos.x + clampedAlong * penDirX,
+      y: currentPos.y + clampedAlong * penDirY,
       alongOffset: clampedAlong,
     };
   };
