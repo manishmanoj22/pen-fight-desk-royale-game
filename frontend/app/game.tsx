@@ -31,37 +31,73 @@ const POWER_SCALE = 150;
 const PEN_LENGTH = 70;
 const PEN_WIDTH = 14;
 
-// Generate obstacles
+// Random number helper
+const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
+
+// Generate randomized obstacles with center barrier
 const generateObstacles = (): Obstacle[] => {
-  return [
-    {
-      id: 'geometry-box',
-      type: 'geometryBox',
-      x: DESK_X + DESK_WIDTH / 2 - 35,
-      y: DESK_Y + 50,
-      width: 70,
-      height: 30,
-      rotation: 12,
-    },
-    {
-      id: 'notebook',
-      type: 'notebook',
-      x: DESK_X + DESK_WIDTH - 90,
-      y: DESK_Y + DESK_HEIGHT - 90,
-      width: 55,
-      height: 45,
-      rotation: -8,
-    },
-    {
-      id: 'eraser',
-      type: 'eraser',
-      x: DESK_X + 40,
-      y: DESK_Y + DESK_HEIGHT - 70,
-      width: 28,
-      height: 14,
-      rotation: 20,
-    },
-  ];
+  const obstacles: Obstacle[] = [];
+  
+  // CENTER BARRIER - prevents instant knockouts
+  // This is a ruler/scale placed in the middle
+  obstacles.push({
+    id: 'center-ruler',
+    type: 'geometryBox',
+    x: DESK_X + DESK_WIDTH / 2 - 45,
+    y: DESK_Y + DESK_HEIGHT / 2 - 12,
+    width: 90,
+    height: 24,
+    rotation: randomInRange(-5, 5),
+  });
+  
+  // Geometry box - random position in top half
+  obstacles.push({
+    id: 'geometry-box',
+    type: 'geometryBox',
+    x: DESK_X + randomInRange(30, DESK_WIDTH - 120),
+    y: DESK_Y + randomInRange(30, 80),
+    width: 70,
+    height: 30,
+    rotation: randomInRange(-20, 20),
+  });
+  
+  // Notebook - random position avoiding center
+  const notebookSide = Math.random() > 0.5 ? 'left' : 'right';
+  obstacles.push({
+    id: 'notebook',
+    type: 'notebook',
+    x: notebookSide === 'left' 
+      ? DESK_X + randomInRange(20, 80)
+      : DESK_X + DESK_WIDTH - randomInRange(70, 120),
+    y: DESK_Y + DESK_HEIGHT - randomInRange(60, 110),
+    width: 55,
+    height: 45,
+    rotation: randomInRange(-15, 15),
+  });
+  
+  // Eraser - random position
+  obstacles.push({
+    id: 'eraser',
+    type: 'eraser',
+    x: DESK_X + randomInRange(40, DESK_WIDTH - 60),
+    y: DESK_Y + randomInRange(DESK_HEIGHT * 0.6, DESK_HEIGHT - 40),
+    width: 28,
+    height: 14,
+    rotation: randomInRange(-30, 30),
+  });
+  
+  // Second eraser for more obstacles
+  obstacles.push({
+    id: 'eraser-2',
+    type: 'eraser',
+    x: DESK_X + randomInRange(40, DESK_WIDTH - 60),
+    y: DESK_Y + randomInRange(40, DESK_HEIGHT * 0.4),
+    width: 24,
+    height: 12,
+    rotation: randomInRange(-25, 25),
+  });
+  
+  return obstacles;
 };
 
 interface PenPosition {
@@ -127,6 +163,11 @@ export default function GameScreen() {
   // Touch tracking refs (for PanResponder closure)
   const touchStartRef = useRef({ x: 0, y: 0 });
   const hitPointRef = useRef({ x: 0, y: 0 });
+  
+  // Refs for game state (to use in PanResponder closure)
+  const isPlayerTurnRef = useRef(true);
+  const isAnimatingRef = useRef(false);
+  const showResultRef = useRef(false);
 
   // Initialize physics engine
   useEffect(() => {
@@ -148,6 +189,19 @@ export default function GameScreen() {
       physicsRef.current?.destroy();
     };
   }, []);
+
+  // Keep refs in sync with state for PanResponder closure
+  useEffect(() => {
+    isPlayerTurnRef.current = isPlayerTurn;
+  }, [isPlayerTurn]);
+  
+  useEffect(() => {
+    isAnimatingRef.current = isAnimating;
+  }, [isAnimating]);
+  
+  useEffect(() => {
+    showResultRef.current = showResult;
+  }, [showResult]);
 
   // Game loop
   const gameLoop = useCallback((timestamp: number) => {
@@ -375,14 +429,24 @@ export default function GameScreen() {
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: (evt) => {
-        if (!isPlayerTurn || isAnimating || showResult) return false;
+        // Use refs for most up-to-date state values
+        if (!isPlayerTurnRef.current || isAnimatingRef.current || showResultRef.current) {
+          return false;
+        }
         const touch = evt.nativeEvent;
         // Only start if touch is actually ON the pen
         return isTouchOnPen(touch.pageX, touch.pageY);
       },
-      onMoveShouldSetPanResponder: () => isPlayerTurn && !isAnimating && !showResult,
+      onMoveShouldSetPanResponder: () => {
+        return isPlayerTurnRef.current && !isAnimatingRef.current && !showResultRef.current;
+      },
       
       onPanResponderGrant: (evt) => {
+        // Double-check it's still player's turn
+        if (!isPlayerTurnRef.current || isAnimatingRef.current) {
+          return;
+        }
+        
         const touch = evt.nativeEvent;
         const hit = getHitPointOnPen(touch.pageX, touch.pageY);
         

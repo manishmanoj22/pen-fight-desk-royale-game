@@ -88,14 +88,15 @@ export class GamePhysics {
     World.add(this.engine.world, this.walls);
     
     // Create pen bodies with improved collision settings
-    const penLength = 80;
-    const penWidth = 12;
+    // Include cap in the length for proper collision
+    const penLength = 95; // Full length including cap
+    const penWidth = 14;
     const capEffect = capOn ? 1.1 : 1.0; // Cap affects center of gravity slightly
     
     // Common settings for better collision detection
     const penCollisionSettings = {
-      slop: 0.01, // Reduce slop for tighter collision
-      chamfer: { radius: 3 }, // Rounded corners for smoother collision
+      slop: 0.005, // Very tight collision tolerance
+      chamfer: { radius: 4 }, // Rounded corners for smoother collision
     };
     
     // Player pen - left side
@@ -105,9 +106,10 @@ export class GamePhysics {
       penLength,
       penWidth,
       {
-        friction: playerPen.friction * 0.15,
-        frictionAir: 0.025,
-        restitution: 0.65,
+        friction: playerPen.friction * 0.3, // More surface friction
+        frictionAir: 0.06, // Much more air friction to reduce gliding
+        frictionStatic: 0.8, // High static friction
+        restitution: 0.5, // Less bouncy
         mass: playerPen.mass * capEffect,
         label: 'pen-player',
         ...penCollisionSettings,
@@ -123,9 +125,10 @@ export class GamePhysics {
       penLength,
       penWidth,
       {
-        friction: aiPen.friction * 0.15,
-        frictionAir: 0.025,
-        restitution: 0.65,
+        friction: aiPen.friction * 0.3, // More surface friction
+        frictionAir: 0.06, // Much more air friction to reduce gliding
+        frictionStatic: 0.8, // High static friction
+        restitution: 0.5, // Less bouncy
         mass: aiPen.mass,
         label: 'pen-ai',
         ...penCollisionSettings,
