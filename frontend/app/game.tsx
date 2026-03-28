@@ -278,34 +278,62 @@ export default function GameScreen() {
     setMessage('New round! Your turn');
   };
 
-  // Check if touch is near the player's pen
-  const isTouchNearPen = (touchX: number, touchY: number) => {
-    const dx = touchX - playerPos.x;
-    const dy = touchY - playerPos.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    return distance < 80; // Touch within 80px of pen center
-  };
-
-  // Calculate where on the pen body was touched (for spin calculation)
-  const calculateHitPoint = (touchX: number, touchY: number) => {
-    // Project touch onto pen axis
+  // Check if touch is actually ON the pen body (not just near it)
+  const isTouchOnPen = (touchX: number, touchY: number) => {
+    // Transform touch point to pen's local coordinate system
     const penAngle = playerPos.angle;
     const penDirX = Math.cos(penAngle);
     const penDirY = Math.sin(penAngle);
+    const perpX = -penDirY; // Perpendicular to pen axis
+    const perpY = penDirX;
+    
+    // Vector from pen center to touch
+    const toTouchX = touchX - playerPos.x;
+    const toTouchY = touchY - playerPos.y;
+    
+    // Project onto pen axis (along the length)
+    const alongPen = toTouchX * penDirX + toTouchY * penDirY;
+    
+    // Project onto perpendicular axis (across the width)
+    const acrossPen = toTouchX * perpX + toTouchY * perpY;
+    
+    // Check if within pen bounds (with some padding for easier touch)
+    const penHalfLength = (PEN_LENGTH / 2) + 15; // +15 for cap
+    const penHalfWidth = (PEN_WIDTH / 2) + 8; // Small padding for easier touch
+    
+    return Math.abs(alongPen) <= penHalfLength && Math.abs(acrossPen) <= penHalfWidth;
+  };
+
+  // Calculate where on the pen body was touched (for spin calculation)
+  // Returns the exact point on the pen surface
+  const calculateHitPoint = (touchX: number, touchY: number) => {
+    const penAngle = playerPos.angle;
+    const penDirX = Math.cos(penAngle);
+    const penDirY = Math.sin(penAngle);
+    const perpX = -penDirY;
+    const perpY = penDirX;
     
     const toTouchX = touchX - playerPos.x;
     const toTouchY = touchY - playerPos.y;
     
-    // Dot product to find position along pen
+    // Position along pen axis
     const alongPen = toTouchX * penDirX + toTouchY * penDirY;
+    // Position across pen (which side)
+    const acrossPen = toTouchX * perpX + toTouchY * perpY;
     
-    // Clamp to pen length
-    const clampedAlong = Math.max(-PEN_LENGTH/2, Math.min(PEN_LENGTH/2, alongPen));
+    // Clamp to pen bounds
+    const clampedAlong = Math.max(-PEN_LENGTH/2, Math.min(PEN_LENGTH/2 + 10, alongPen));
+    const clampedAcross = Math.max(-PEN_WIDTH/2, Math.min(PEN_WIDTH/2, acrossPen));
+    
+    // Convert back to world coordinates - hit point is ON the pen surface
+    const hitX = playerPos.x + clampedAlong * penDirX + clampedAcross * perpX;
+    const hitY = playerPos.y + clampedAlong * penDirY + clampedAcross * perpY;
     
     return {
-      x: playerPos.x + clampedAlong * penDirX,
-      y: playerPos.y + clampedAlong * penDirY,
-      offset: clampedAlong, // Negative = tip side, Positive = cap side
+      x: hitX,
+      y: hitY,
+      alongOffset: clampedAlong, // Position along pen (-ve = tip, +ve = cap)
+      acrossOffset: clampedAcross, // Which side of pen
     };
   };
 
@@ -315,7 +343,8 @@ export default function GameScreen() {
       onStartShouldSetPanResponder: (evt) => {
         if (!isPlayerTurn || isAnimating || showResult) return false;
         const touch = evt.nativeEvent;
-        return isTouchNearPen(touch.pageX, touch.pageY);
+        // Only start if touch is actually ON the pen
+        return isTouchOnPen(touch.pageX, touch.pageY);
       },
       onMoveShouldSetPanResponder: () => isPlayerTurn && !isAnimating && !showResult,
       

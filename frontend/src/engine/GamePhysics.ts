@@ -230,7 +230,7 @@ export class GamePhysics {
     };
   }
   
-  // Check if pen center is completely outside the desk bounds
+  // Check if pen center of gravity is outside the desk bounds
   isPenOffDesk(isPlayer: boolean): boolean {
     const penKey = isPlayer ? 'player' : 'ai';
     const penData = this.penBodies.get(penKey);
@@ -239,13 +239,13 @@ export class GamePhysics {
     
     const pos = penData.body.position;
     const { deskX, deskY, deskWidth, deskHeight } = this.config;
-    const margin = 40; // Pen must be this far outside to count as "off"
     
+    // Game ends when center of gravity (pen center) is outside desk bounds
     return (
-      pos.x < deskX - margin ||
-      pos.x > deskX + deskWidth + margin ||
-      pos.y < deskY - margin ||
-      pos.y > deskY + deskHeight + margin
+      pos.x < deskX ||
+      pos.x > deskX + deskWidth ||
+      pos.y < deskY ||
+      pos.y > deskY + deskHeight
     );
   }
   
