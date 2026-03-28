@@ -2,7 +2,7 @@ import Matter from 'matter-js';
 import { Obstacle } from '../components/Desk';
 import { PenStats } from '../store/gameStore';
 
-const { Engine, World, Bodies, Body, Events, Vector } = Matter;
+const { Engine, World, Bodies, Body, Events, Vector, Resolver } = Matter;
 
 export interface PenBody {
   body: Matter.Body;
@@ -31,6 +31,12 @@ export class GamePhysics {
     this.engine = Engine.create({
       gravity: { x: 0, y: 0 }, // Top-down view, no gravity
     });
+    
+    // Improve collision detection accuracy
+    // @ts-ignore - Matter.js internal setting
+    this.engine.positionIterations = 10; // More position solving iterations
+    // @ts-ignore
+    this.engine.velocityIterations = 10; // More velocity solving iterations
     
     // Set up collision detection
     Events.on(this.engine, 'collisionStart', this.handleCollision.bind(this));
@@ -81,10 +87,16 @@ export class GamePhysics {
     
     World.add(this.engine.world, this.walls);
     
-    // Create pen bodies
+    // Create pen bodies with improved collision settings
     const penLength = 80;
     const penWidth = 12;
     const capEffect = capOn ? 1.1 : 1.0; // Cap affects center of gravity slightly
+    
+    // Common settings for better collision detection
+    const penCollisionSettings = {
+      slop: 0.01, // Reduce slop for tighter collision
+      chamfer: { radius: 3 }, // Rounded corners for smoother collision
+    };
     
     // Player pen - left side
     const playerBody = Bodies.rectangle(
@@ -93,11 +105,12 @@ export class GamePhysics {
       penLength,
       penWidth,
       {
-        friction: playerPen.friction * 0.1,
-        frictionAir: 0.02,
-        restitution: 0.6,
+        friction: playerPen.friction * 0.15,
+        frictionAir: 0.025,
+        restitution: 0.65,
         mass: playerPen.mass * capEffect,
         label: 'pen-player',
+        ...penCollisionSettings,
       }
     );
     Body.setMass(playerBody, playerPen.mass * capEffect);
@@ -110,11 +123,12 @@ export class GamePhysics {
       penLength,
       penWidth,
       {
-        friction: aiPen.friction * 0.1,
-        frictionAir: 0.02,
-        restitution: 0.6,
+        friction: aiPen.friction * 0.15,
+        frictionAir: 0.025,
+        restitution: 0.65,
         mass: aiPen.mass,
         label: 'pen-ai',
+        ...penCollisionSettings,
       }
     );
     Body.setMass(aiBody, aiPen.mass);
@@ -203,20 +217,37 @@ export class GamePhysics {
     const angularVelocity = spinFactor * spinDirection * 0.15 * powerMultiplier;
     Body.setAngularVelocity(body, angularVelocity);
     
-    // Apply linear velocity - don't divide by mass here, Matter.js handles mass
-    // Scale force appropriately for the physics simulation
+    // Apply linear velocity - limit max speed to prevent tunneling
     const velocityScale = 0.8 * powerMultiplier;
-    const velocity = {
+    const maxSpeed = 15; // Maximum speed to prevent tunneling
+    let velocity = {
       x: force.x * velocityScale,
       y: force.y * velocityScale
     };
+    
+    // Clamp velocity if too fast
+    const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+    if (speed > maxSpeed) {
+      const scale = maxSpeed / speed;
+      velocity = {
+        x: velocity.x * scale,
+        y: velocity.y * scale
+      };
+    }
+    
     Body.setVelocity(body, velocity);
     
     console.log('Flick applied:', { velocity, angularVelocity, hitDistance, spinFactor });
   }
   
   update(deltaTime: number) {
-    Engine.update(this.engine, deltaTime);
+    // Use smaller sub-steps for better collision detection
+    const subSteps = 3;
+    const subDelta = deltaTime / subSteps;
+    
+    for (let i = 0; i < subSteps; i++) {
+      Engine.update(this.engine, subDelta);
+    }
   }
   
   getPenPosition(isPlayer: boolean): { x: number; y: number; angle: number } | null {
