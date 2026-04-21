@@ -64,17 +64,32 @@ function PenCard({ pen, isSelected, onSelect }: { pen: PenStats; isSelected: boo
 
 export default function SelectPenScreen() {
   const router = useRouter();
-  const { playerPen, setPlayerPen, setGameStatus } = useGameStore();
+  const { playerPen, setPlayerPen, setGameStatus, gameMode, selectingPlayer, setSelectingPlayer } = useGameStore();
   const [selectedPen, setSelectedPen] = useState<PenStats>(playerPen);
 
   const handleConfirm = () => {
-    setPlayerPen(selectedPen);
-    // Randomly select AI pen (different from player)
-    const availablePens = PEN_CATALOG.filter(p => p.id !== selectedPen.id);
-    const aiPen = availablePens[Math.floor(Math.random() * availablePens.length)];
-    useGameStore.getState().setAiPen(aiPen);
-    setGameStatus('playing');
-    router.push('/game');
+    if (gameMode === 'local-multiplayer') {
+      if (selectingPlayer === 1) {
+        setPlayerPen(selectedPen);
+        setSelectingPlayer(2);
+        // Default player 2's selection to avoid collision
+        const availablePens = PEN_CATALOG.filter(p => p.id !== selectedPen.id);
+        setSelectedPen(availablePens[0]);
+      } else {
+        useGameStore.getState().setAiPen(selectedPen);
+        setSelectingPlayer(1);
+        setGameStatus('playing');
+        router.push('/game');
+      }
+    } else {
+      setPlayerPen(selectedPen);
+      // Randomly select AI pen (different from player)
+      const availablePens = PEN_CATALOG.filter(p => p.id !== selectedPen.id);
+      const aiPen = availablePens[Math.floor(Math.random() * availablePens.length)];
+      useGameStore.getState().setAiPen(aiPen);
+      setGameStatus('playing');
+      router.push('/game');
+    }
   };
 
   return (
@@ -91,7 +106,11 @@ export default function SelectPenScreen() {
           >
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.title}>Choose Your Pen</Text>
+          <Text style={styles.title}>
+            {gameMode === 'local-multiplayer' 
+              ? (selectingPlayer === 1 ? "Player 1: Choose Pen" : "Player 2: Choose Pen")
+              : "Choose Your Pen"}
+          </Text>
           <View style={{ width: 40 }} />
         </View>
 
@@ -158,7 +177,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#FFFFFF',
   },

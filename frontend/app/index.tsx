@@ -18,9 +18,13 @@ export default function HomeScreen() {
   const router = useRouter();
   const resetGame = useGameStore((state) => state.resetGame);
   const setGameStatus = useGameStore((state) => state.setGameStatus);
+  const setGameMode = useGameStore((state) => state.setGameMode);
+  const setAiDifficulty = useGameStore((state) => state.setAiDifficulty);
 
-  const handlePlay = () => {
+  const startSetup = (mode: 'vs-ai' | 'local-multiplayer', difficulty: 'normal' | 'hard') => {
     resetGame();
+    setGameMode(mode);
+    setAiDifficulty(difficulty);
     setGameStatus('selecting');
     router.push('/select-pen');
   };
@@ -44,7 +48,7 @@ export default function HomeScreen() {
             </View>
           </View>
           
-          <Text style={styles.title}>PEN STRIKE</Text>
+          <Text style={styles.title}>PEN FIGHT</Text>
           <Text style={styles.subtitle}>DESK ROYALE</Text>
           
           <View style={styles.taglineContainer}>
@@ -56,17 +60,33 @@ export default function HomeScreen() {
         <View style={styles.menuContainer}>
           <TouchableOpacity
             style={styles.playButton}
-            onPress={handlePlay}
+            onPress={() => startSetup('vs-ai', 'normal')}
             activeOpacity={0.8}
           >
             <LinearGradient
-              colors={['#e94560', '#c23a51']}
+              colors={['#EF4444', '#DC2626']}
               style={styles.playButtonGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
-              <Ionicons name="play" size={28} color="#FFFFFF" />
-              <Text style={styles.playButtonText}>PLAY</Text>
+              <Ionicons name="person" size={22} color="#FFFFFF" />
+              <Text style={styles.playButtonText}>VS AI</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.playButton}
+            onPress={() => startSetup('local-multiplayer', 'normal')}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={['#F59E0B', '#D97706']}
+              style={styles.playButtonGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <Ionicons name="people" size={22} color="#FFFFFF" />
+              <Text style={styles.playButtonText}>PASS & PLAY</Text>
             </LinearGradient>
           </TouchableOpacity>
 
@@ -212,10 +232,10 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   playButtonText: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#FFFFFF',
-    letterSpacing: 3,
+    letterSpacing: 2,
   },
   menuButton: {
     width: '100%',

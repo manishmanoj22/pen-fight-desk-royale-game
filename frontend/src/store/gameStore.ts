@@ -17,7 +17,7 @@ export interface PenStats {
 export const PEN_CATALOG: PenStats[] = [
   {
     id: 'classic',
-    name: 'Cello Gripper',
+    name: 'Classic Ballpoint',
     class: 'classic',
     mass: 1.0,
     friction: 0.5,
@@ -28,7 +28,7 @@ export const PEN_CATALOG: PenStats[] = [
   },
   {
     id: 'heavyweight',
-    name: 'Parker Fountain',
+    name: 'Executive Fountain',
     class: 'heavyweight',
     mass: 1.8,
     friction: 0.7,
@@ -39,18 +39,18 @@ export const PEN_CATALOG: PenStats[] = [
   },
   {
     id: 'acrobat',
-    name: 'Reynolds Slim',
+    name: 'Slim Rollerball',
     class: 'acrobat',
-    mass: 0.6,
-    friction: 0.3,
+    mass: 0.7,
+    friction: 0.4,
     rotationSpeed: 2.0,
     description: 'Light and fast. Perfect for trick shots.',
     color: '#DC2626',
     secondaryColor: '#FBBF24',
   },
   {
-    id: 'natraj',
-    name: 'Natraj 621',
+    id: 'pencil',
+    name: 'HB Wood Pencil',
     class: 'classic',
     mass: 0.9,
     friction: 0.45,
@@ -63,8 +63,8 @@ export const PEN_CATALOG: PenStats[] = [
     id: 'pilot',
     name: 'Pilot V7',
     class: 'acrobat',
-    mass: 0.7,
-    friction: 0.35,
+    mass: 0.85,
+    friction: 0.5,
     rotationSpeed: 1.8,
     description: 'Smooth glider with excellent control.',
     color: '#059669',
@@ -76,30 +76,36 @@ export interface GameState {
   // Player pen
   playerPen: PenStats;
   aiPen: PenStats;
-  
+
   // Game state
   isPlayerTurn: boolean;
   playerScore: number;
   aiScore: number;
   roundsToWin: number;
-  
+
   // Power-ups
-  hasRefillPower: boolean;
+  p1HasRefill: boolean;
+  p2HasRefill: boolean;
   capOn: boolean;
-  
+
   // Game status
+  selectingPlayer: 1 | 2;
+  gameMode: 'vs-ai' | 'local-multiplayer';
+  aiDifficulty: 'normal' | 'hard';
   gameStatus: 'menu' | 'selecting' | 'playing' | 'paused' | 'gameOver';
   winner: 'player' | 'ai' | null;
-  
+
   // Actions
   setPlayerPen: (pen: PenStats) => void;
   setAiPen: (pen: PenStats) => void;
   toggleTurn: () => void;
   incrementPlayerScore: () => void;
   incrementAiScore: () => void;
-  toggleCap: () => void;
-  useRefillPower: () => void;
+  useRefillPower: (isPlayer1: boolean) => void;
   resetRefillPower: () => void;
+  setSelectingPlayer: (player: 1 | 2) => void;
+  setGameMode: (mode: GameState['gameMode']) => void;
+  setAiDifficulty: (difficulty: GameState['aiDifficulty']) => void;
   setGameStatus: (status: GameState['gameStatus']) => void;
   setWinner: (winner: 'player' | 'ai' | null) => void;
   resetGame: () => void;
@@ -112,27 +118,35 @@ export const useGameStore = create<GameState>((set) => ({
   playerScore: 0,
   aiScore: 0,
   roundsToWin: 3,
-  hasRefillPower: true,
+  p1HasRefill: true,
+  p2HasRefill: true,
   capOn: true,
+  selectingPlayer: 1,
+  gameMode: 'vs-ai',
+  aiDifficulty: 'normal',
   gameStatus: 'menu',
   winner: null,
-  
+
   setPlayerPen: (pen) => set({ playerPen: pen }),
   setAiPen: (pen) => set({ aiPen: pen }),
   toggleTurn: () => set((state) => ({ isPlayerTurn: !state.isPlayerTurn })),
   incrementPlayerScore: () => set((state) => ({ playerScore: state.playerScore + 1 })),
   incrementAiScore: () => set((state) => ({ aiScore: state.aiScore + 1 })),
-  toggleCap: () => set((state) => ({ capOn: !state.capOn })),
-  useRefillPower: () => set({ hasRefillPower: false }),
-  resetRefillPower: () => set({ hasRefillPower: true }),
+  useRefillPower: (isPlayer1) => set((state) => isPlayer1 ? { p1HasRefill: false } : { p2HasRefill: false }),
+  resetRefillPower: () => set({ p1HasRefill: true, p2HasRefill: true }),
+  setSelectingPlayer: (player) => set({ selectingPlayer: player }),
+  setGameMode: (mode) => set({ gameMode: mode }),
+  setAiDifficulty: (difficulty) => set({ aiDifficulty: difficulty }),
   setGameStatus: (status) => set({ gameStatus: status }),
   setWinner: (winner) => set({ winner }),
   resetGame: () => set({
     isPlayerTurn: true,
     playerScore: 0,
     aiScore: 0,
-    hasRefillPower: true,
+    p1HasRefill: true,
+    p2HasRefill: true,
     capOn: true,
+    selectingPlayer: 1,
     gameStatus: 'menu',
     winner: null,
   }),
