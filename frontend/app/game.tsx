@@ -8,7 +8,11 @@ import {
   Modal,
   GestureResponderEvent,
   LayoutChangeEvent,
+  Platform,
+  useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -147,6 +151,21 @@ export default function GameScreen() {
     setWinner,
     resetGame,
   } = useGameStore();
+
+  // Like mobile billiards games, the native app plays in landscape; menus stay portrait
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+    return () => {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    };
+  }, []);
+
+  // On wide screens the HUD and power-ups move to columns beside the desk so
+  // the desk can use the full height
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const sideLayout = windowWidth > windowHeight * 1.3;
+  const insets = useSafeAreaInsets();
 
   const world = DESK_WORLD;
   const { DESK_X, DESK_Y, DESK_WIDTH, DESK_HEIGHT, WORLD_WIDTH, WORLD_HEIGHT } = world;
@@ -637,44 +656,46 @@ export default function GameScreen() {
   const powerColor = power > 0.7 ? '#EF4444' : power > 0.4 ? '#F59E0B' : '#22C55E';
 
   return (
-    <View style={styles.container} {...panResponder.panHandlers}>
+    <View style={[styles.container, sideLayout && styles.containerSide]} {...panResponder.panHandlers}>
       {/* Background */}
       <LinearGradient
         colors={['#2D1B0E', '#3D2817', '#4A3520']}
         style={styles.background}
       />
 
-      {/* HUD */}
-      <View style={styles.hud}>
-        <TouchableOpacity style={styles.pauseBtn} onPress={() => setIsPaused(true)}>
-          <Ionicons name="pause" size={24} color="#FFF" />
-        </TouchableOpacity>
+      {/* HUD - a top bar, or a left column on wide screens */}
+      <View style={sideLayout ? [styles.sidePanel, { paddingLeft: 12 + insets.left }] : undefined}>
+        <View style={sideLayout ? styles.hudSide : styles.hud}>
+          <TouchableOpacity style={styles.pauseBtn} onPress={() => setIsPaused(true)}>
+            <Ionicons name="pause" size={24} color="#FFF" />
+          </TouchableOpacity>
 
-        <View style={styles.scoreContainer}>
-          <View style={styles.scoreBox}>
-            <View style={[styles.penIndicator, { backgroundColor: playerPen.color }]} />
-            <Text style={styles.scoreName}>YOU</Text>
-            <Text style={styles.scoreValue}>{playerScore}</Text>
-          </View>
+          <View style={[styles.scoreContainer, sideLayout && styles.scoreContainerSide]}>
+            <View style={styles.scoreBox}>
+              <View style={[styles.penIndicator, { backgroundColor: playerPen.color }]} />
+              <Text style={styles.scoreName}>YOU</Text>
+              <Text style={styles.scoreValue}>{playerScore}</Text>
+            </View>
           
-          <View style={styles.vsBox}>
-            <Text style={styles.vsText}>VS</Text>
-            <Text style={styles.roundText}>First to {roundsToWin}</Text>
-          </View>
+            <View style={styles.vsBox}>
+              <Text style={styles.vsText}>VS</Text>
+              <Text style={styles.roundText}>First to {roundsToWin}</Text>
+            </View>
           
-          <View style={styles.scoreBox}>
-            <View style={[styles.penIndicator, { backgroundColor: aiPen.color }]} />
-            <Text style={styles.scoreName}>AI</Text>
-            <Text style={styles.scoreValue}>{aiScore}</Text>
+            <View style={styles.scoreBox}>
+              <View style={[styles.penIndicator, { backgroundColor: aiPen.color }]} />
+              <Text style={styles.scoreName}>AI</Text>
+              <Text style={styles.scoreValue}>{aiScore}</Text>
+            </View>
           </View>
         </View>
-      </View>
 
-      {/* Turn indicator & Message */}
-      <View style={[styles.turnIndicator, { backgroundColor: isPlayerTurn ? '#22C55E' : '#EF4444' }]}>
-        <Text style={styles.turnText}>
-          {message || (isPlayerTurn ? 'Your Turn' : 'AI Turn')}
-        </Text>
+        {/* Turn indicator & Message */}
+        <View style={[styles.turnIndicator, sideLayout && styles.turnIndicatorSide, { backgroundColor: isPlayerTurn ? '#22C55E' : '#EF4444' }]}>
+          <Text style={styles.turnText}>
+            {message || (isPlayerTurn ? 'Your Turn' : 'AI Turn')}
+          </Text>
+        </View>
       </View>
 
       {/* Board - fills the space between HUD and power-ups; the world is scaled to fit */}
@@ -1200,7 +1221,7 @@ export default function GameScreen() {
       </View>
 
       {/* Power-ups - the row always keeps its space so the board doesn't jump between turns */}
-      <View style={styles.powerUps}>
+      <View style={sideLayout ? [styles.powerUpsSide, { paddingRight: 12 + insets.right }] : styles.powerUps}>
         {isPlayerTurn && !isAnimating && !showResult && (
           <>
             <TouchableOpacity
@@ -1293,6 +1314,33 @@ const styles = StyleSheet.create({
   background: {
     ...StyleSheet.absoluteFillObject,
   },
+  containerSide: {
+    flexDirection: 'row',
+  },
+  sidePanel: {
+    width: 150,
+    paddingRight: 12,
+    paddingVertical: 16,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+  },
+  hudSide: {
+    flex: 1,
+  },
+  scoreContainerSide: {
+    flexDirection: 'column',
+    gap: 6,
+  },
+  turnIndicatorSide: {
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
+  powerUpsSide: {
+    width: 130,
+    paddingLeft: 12,
+    justifyContent: 'center',
+    gap: 12,
+  },
   board: {
     flex: 1,
     alignItems: 'center',
@@ -1363,6 +1411,7 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 13,
     fontWeight: '600',
+    textAlign: 'center',
   },
   powerBar: {
     position: 'absolute',
