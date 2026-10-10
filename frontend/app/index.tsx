@@ -191,6 +191,7 @@ const styles = StyleSheet.create({
   },
   menuContainer: {
     width: '80%',
+    maxWidth: 420,
     alignItems: 'center',
     gap: 16,
   },

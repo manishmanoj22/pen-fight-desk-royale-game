@@ -52,80 +52,82 @@ export default function HowToPlayScreen() {
         colors={['#1a1a2e', '#16213e', '#0f3460']}
         style={styles.gradient}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <Text style={styles.title}>How to Play</Text>
-          <View style={{ width: 40 }} />
-        </View>
-
-        {/* Instructions */}
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {instructions.map((item, index) => (
-            <View key={index} style={styles.instructionCard}>
-              <View style={styles.iconContainer}>
-                <Ionicons name={item.icon as any} size={28} color="#e94560" />
-              </View>
-              <View style={styles.textContainer}>
-                <Text style={styles.instructionTitle}>{item.title}</Text>
-                <Text style={styles.instructionDescription}>{item.description}</Text>
-              </View>
-            </View>
-          ))}
-
-          {/* Pen Classes */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Pen Classes</Text>
-          </View>
-
-          <View style={styles.penClassCard}>
-            <Text style={styles.penClassName}>The Heavyweight</Text>
-            <Text style={styles.penClassDescription}>
-              Metal Fountain Pens - High mass, low spin. Hard to knock back but slow to recover.
-            </Text>
-          </View>
-
-          <View style={styles.penClassCard}>
-            <Text style={styles.penClassName}>The Acrobat</Text>
-            <Text style={styles.penClassDescription}>
-              Slim Ballpoints - Low mass, high spin. Perfect for trick shots and quick maneuvers.
-            </Text>
-          </View>
-
-          <View style={styles.penClassCard}>
-            <Text style={styles.penClassName}>The Classic</Text>
-            <Text style={styles.penClassDescription}>
-              Cello/Reynolds style - Balanced stats. Great for beginners learning the game.
-            </Text>
-          </View>
-        </ScrollView>
-
-        {/* Play Button */}
-        <View style={styles.bottomContainer}>
-          <TouchableOpacity
-            style={styles.playButton}
-            onPress={() => router.push('/select-pen')}
-            activeOpacity={0.8}
-          >
-            <LinearGradient
-              colors={['#e94560', '#c23a51']}
-              style={styles.playGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+        <View style={styles.content}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
             >
-              <Text style={styles.playText}>START PLAYING</Text>
-              <Ionicons name="game-controller" size={24} color="#FFFFFF" />
-            </LinearGradient>
-          </TouchableOpacity>
+              <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+            <Text style={styles.title}>How to Play</Text>
+            <View style={{ width: 40 }} />
+          </View>
+
+          {/* Instructions */}
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {instructions.map((item, index) => (
+              <View key={index} style={styles.instructionCard}>
+                <View style={styles.iconContainer}>
+                  <Ionicons name={item.icon as any} size={28} color="#e94560" />
+                </View>
+                <View style={styles.textContainer}>
+                  <Text style={styles.instructionTitle}>{item.title}</Text>
+                  <Text style={styles.instructionDescription}>{item.description}</Text>
+                </View>
+              </View>
+            ))}
+
+            {/* Pen Classes */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Pen Classes</Text>
+            </View>
+
+            <View style={styles.penClassCard}>
+              <Text style={styles.penClassName}>The Heavyweight</Text>
+              <Text style={styles.penClassDescription}>
+                Metal Fountain Pens - High mass, low spin. Hard to knock back but slow to recover.
+              </Text>
+            </View>
+
+            <View style={styles.penClassCard}>
+              <Text style={styles.penClassName}>The Acrobat</Text>
+              <Text style={styles.penClassDescription}>
+                Slim Ballpoints - Low mass, high spin. Perfect for trick shots and quick maneuvers.
+              </Text>
+            </View>
+
+            <View style={styles.penClassCard}>
+              <Text style={styles.penClassName}>The Classic</Text>
+              <Text style={styles.penClassDescription}>
+                Cello/Reynolds style - Balanced stats. Great for beginners learning the game.
+              </Text>
+            </View>
+          </ScrollView>
+
+          {/* Play Button */}
+          <View style={styles.bottomContainer}>
+            <TouchableOpacity
+              style={styles.playButton}
+              onPress={() => router.push('/select-pen')}
+              activeOpacity={0.8}
+            >
+              <LinearGradient
+                colors={['#e94560', '#c23a51']}
+                style={styles.playGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Text style={styles.playText}>START PLAYING</Text>
+                <Ionicons name="game-controller" size={24} color="#FFFFFF" />
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
       </LinearGradient>
     </View>
@@ -138,6 +140,13 @@ const styles = StyleSheet.create({
   },
   gradient: {
     flex: 1,
+  },
+  // Keep the layout readable on wide screens instead of stretching edge to edge
+  content: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   header: {
     flexDirection: 'row',

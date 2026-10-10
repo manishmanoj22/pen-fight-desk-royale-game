@@ -83,51 +83,53 @@ export default function SelectPenScreen() {
         colors={['#1a1a2e', '#16213e', '#0f3460']}
         style={styles.gradient}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <Text style={styles.title}>Choose Your Pen</Text>
-          <View style={{ width: 40 }} />
-        </View>
-
-        {/* Pen Selection */}
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {PEN_CATALOG.map((pen) => (
-            <PenCard
-              key={pen.id}
-              pen={pen}
-              isSelected={selectedPen.id === pen.id}
-              onSelect={() => setSelectedPen(pen)}
-            />
-          ))}
-        </ScrollView>
-
-        {/* Confirm Button */}
-        <View style={styles.bottomContainer}>
-          <TouchableOpacity
-            style={styles.confirmButton}
-            onPress={handleConfirm}
-            activeOpacity={0.8}
-          >
-            <LinearGradient
-              colors={['#22C55E', '#16A34A']}
-              style={styles.confirmGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+        <View style={styles.content}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
             >
-              <Text style={styles.confirmText}>START BATTLE</Text>
-              <Ionicons name="arrow-forward" size={24} color="#FFFFFF" />
-            </LinearGradient>
-          </TouchableOpacity>
+              <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+            <Text style={styles.title}>Choose Your Pen</Text>
+            <View style={{ width: 40 }} />
+          </View>
+
+          {/* Pen Selection */}
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {PEN_CATALOG.map((pen) => (
+              <PenCard
+                key={pen.id}
+                pen={pen}
+                isSelected={selectedPen.id === pen.id}
+                onSelect={() => setSelectedPen(pen)}
+              />
+            ))}
+          </ScrollView>
+
+          {/* Confirm Button */}
+          <View style={styles.bottomContainer}>
+            <TouchableOpacity
+              style={styles.confirmButton}
+              onPress={handleConfirm}
+              activeOpacity={0.8}
+            >
+              <LinearGradient
+                colors={['#22C55E', '#16A34A']}
+                style={styles.confirmGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Text style={styles.confirmText}>START BATTLE</Text>
+                <Ionicons name="arrow-forward" size={24} color="#FFFFFF" />
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
       </LinearGradient>
     </View>
@@ -140,6 +142,13 @@ const styles = StyleSheet.create({
   },
   gradient: {
     flex: 1,
+  },
+  // Keep the layout readable on wide screens instead of stretching edge to edge
+  content: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   header: {
     flexDirection: 'row',

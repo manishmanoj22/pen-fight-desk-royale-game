@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Modal,
   GestureResponderEvent,
+  LayoutChangeEvent,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,14 +19,36 @@ import { GamePhysics } from '../src/engine/GamePhysics';
 import { GameAI } from '../src/engine/GameAI';
 import { Obstacle } from '../src/components/Desk';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+// The game runs in a fixed-size world that is scaled to fit the screen, so
+// pens, obstacles and physics keep the same proportions on every device.
+// Wide screens get a landscape desk, tall screens a portrait one.
+interface DeskWorld {
+  DESK_X: number;
+  DESK_Y: number;
+  DESK_WIDTH: number;
+  DESK_HEIGHT: number;
+  WORLD_WIDTH: number;
+  WORLD_HEIGHT: number;
+}
+
+const WORLD_PADDING = 16; // Room around the desk so falling pens stay visible
+
+const createDeskWorld = (): DeskWorld => {
+  const { width, height } = Dimensions.get('window');
+  const landscape = width > height;
+  const DESK_WIDTH = landscape ? 600 : 358;
+  const DESK_HEIGHT = landscape ? 380 : 464;
+  return {
+    DESK_X: WORLD_PADDING,
+    DESK_Y: WORLD_PADDING,
+    DESK_WIDTH,
+    DESK_HEIGHT,
+    WORLD_WIDTH: DESK_WIDTH + WORLD_PADDING * 2,
+    WORLD_HEIGHT: DESK_HEIGHT + WORLD_PADDING * 2,
+  };
+};
 
 // Game constants
-const DESK_MARGIN = 16;
-const DESK_WIDTH = SCREEN_WIDTH - DESK_MARGIN * 2;
-const DESK_HEIGHT = SCREEN_HEIGHT * 0.55;
-const DESK_X = DESK_MARGIN;
-const DESK_Y = 140;
 const MAX_POWER = 1;
 const POWER_SCALE = 150;
 const PEN_LENGTH = 70;
@@ -35,7 +58,7 @@ const PEN_WIDTH = 14;
 const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
 
 // Generate randomized obstacles with center barrier
-const generateObstacles = (): Obstacle[] => {
+const generateObstacles = ({ DESK_X, DESK_Y, DESK_WIDTH, DESK_HEIGHT }: DeskWorld): Obstacle[] => {
   const obstacles: Obstacle[] = [];
   
   // CENTER BARRIER - smaller ruler to slow down but not block completely
@@ -127,6 +150,31 @@ export default function GameScreen() {
     resetGame,
   } = useGameStore();
 
+  const [world] = useState(createDeskWorld);
+  const { DESK_X, DESK_Y, DESK_WIDTH, DESK_HEIGHT, WORLD_WIDTH, WORLD_HEIGHT } = world;
+
+  // How the world is scaled and placed on screen; updated whenever the board resizes
+  const [board, setBoard] = useState({ scale: 1, offsetX: 0, offsetY: 0 });
+  const boardRef = useRef(board);
+
+  const handleBoardLayout = (e: LayoutChangeEvent) => {
+    const { x, y, width, height } = e.nativeEvent.layout;
+    const scale = Math.min(width / WORLD_WIDTH, height / WORLD_HEIGHT);
+    const next = {
+      scale,
+      offsetX: x + (width - WORLD_WIDTH * scale) / 2,
+      offsetY: y + (height - WORLD_HEIGHT * scale) / 2,
+    };
+    boardRef.current = next;
+    setBoard(next);
+  };
+
+  // Convert a screen touch point into world coordinates
+  const toWorld = (pageX: number, pageY: number) => {
+    const { scale, offsetX, offsetY } = boardRef.current;
+    return { x: (pageX - offsetX) / scale, y: (pageY - offsetY) / scale };
+  };
+
   // Initial positions
   const initialPlayerPos = { x: DESK_X + 80, y: DESK_Y + DESK_HEIGHT / 2, angle: 0 };
   const initialAiPos = { x: DESK_X + DESK_WIDTH - 80, y: DESK_Y + DESK_HEIGHT / 2, angle: Math.PI };
@@ -148,7 +196,7 @@ export default function GameScreen() {
   const [roundWinner, setRoundWinner] = useState<'player' | 'ai' | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
   const [refillActive, setRefillActive] = useState(false);
-  const [obstacles] = useState<Obstacle[]>(generateObstacles());
+  const [obstacles] = useState<Obstacle[]>(() => generateObstacles(world));
   const [message, setMessage] = useState('');
   const [roundStarter, setRoundStarter] = useState<'player' | 'ai'>('player'); // Track who starts each round
 
@@ -432,9 +480,9 @@ export default function GameScreen() {
         if (!isPlayerTurnRef.current || isAnimatingRef.current || showResultRef.current) {
           return false;
         }
-        const touch = evt.nativeEvent;
+        const touch = toWorld(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
         // Only start if touch is actually ON the pen
-        return isTouchOnPen(touch.pageX, touch.pageY);
+        return isTouchOnPen(touch.x, touch.y);
       },
       onMoveShouldSetPanResponder: () => {
         return isPlayerTurnRef.current && !isAnimatingRef.current && !showResultRef.current;
@@ -446,38 +494,38 @@ export default function GameScreen() {
           return;
         }
         
-        const touch = evt.nativeEvent;
-        const hit = getHitPointOnPen(touch.pageX, touch.pageY);
+        const touch = toWorld(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+        const hit = getHitPointOnPen(touch.x, touch.y);
         
         // Store in refs for closure access
-        touchStartRef.current = { x: touch.pageX, y: touch.pageY };
+        touchStartRef.current = { x: touch.x, y: touch.y };
         hitPointRef.current = { x: hit.x, y: hit.y };
         
         setIsAiming(true);
-        setTouchStart({ x: touch.pageX, y: touch.pageY });
-        setTouchCurrent({ x: touch.pageX, y: touch.pageY });
+        setTouchStart({ x: touch.x, y: touch.y });
+        setTouchCurrent({ x: touch.x, y: touch.y });
         setHitPoint({ x: hit.x, y: hit.y });
         setPower(0);
         setMessage('Pull back and release to flick!');
       },
       
       onPanResponderMove: (evt) => {
-        const touch = evt.nativeEvent;
-        setTouchCurrent({ x: touch.pageX, y: touch.pageY });
+        const touch = toWorld(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+        setTouchCurrent({ x: touch.x, y: touch.y });
         
         // Use ref for start position (refs work in closures)
         const startX = touchStartRef.current.x;
         const startY = touchStartRef.current.y;
         
-        const dx = startX - touch.pageX;
-        const dy = startY - touch.pageY;
+        const dx = startX - touch.x;
+        const dy = startY - touch.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
         const newPower = Math.min(MAX_POWER, distance / POWER_SCALE);
         setPower(newPower);
       },
       
       onPanResponderRelease: (evt) => {
-        const touch = evt.nativeEvent;
+        const touch = toWorld(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
         
         // Use refs for start position and hit point
         const startX = touchStartRef.current.x;
@@ -485,8 +533,8 @@ export default function GameScreen() {
         const hitX = hitPointRef.current.x;
         const hitY = hitPointRef.current.y;
         
-        const dx = startX - touch.pageX;
-        const dy = startY - touch.pageY;
+        const dx = startX - touch.x;
+        const dy = startY - touch.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
         
         // If very short drag, just cancel - let user try again
@@ -619,537 +667,546 @@ export default function GameScreen() {
         </Text>
       </View>
 
-      {/* Power bar when aiming */}
-      {isAiming && (
-        <View style={styles.powerBar}>
-          <Text style={styles.powerLabel}>POWER</Text>
-          <View style={styles.powerBarOuter}>
-            <View style={[styles.powerBarInner, { width: `${power * 100}%`, backgroundColor: powerColor }]} />
+      {/* Board - fills the space between HUD and power-ups; the world is scaled to fit */}
+      <View style={styles.board} onLayout={handleBoardLayout}>
+        {/* Power bar when aiming */}
+        {isAiming && (
+          <View style={styles.powerBar}>
+            <Text style={styles.powerLabel}>POWER</Text>
+            <View style={styles.powerBarOuter}>
+              <View style={[styles.powerBarInner, { width: `${power * 100}%`, backgroundColor: powerColor }]} />
+            </View>
+            <Text style={[styles.powerPercent, { color: powerColor }]}>{Math.round(power * 100)}%</Text>
           </View>
-          <Text style={[styles.powerPercent, { color: powerColor }]}>{Math.round(power * 100)}%</Text>
-        </View>
-      )}
+        )}
 
-      {/* Game Canvas - SVG for everything */}
-      <Svg width={SCREEN_WIDTH} height={SCREEN_HEIGHT} style={styles.canvas}>
-        {/* Definitions for gradients and patterns */}
-        <Defs>
-          {/* Wood grain pattern */}
-          <SvgLinearGradient id="woodGradient" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#D4A574" />
-            <Stop offset="0.3" stopColor="#C49A6C" />
-            <Stop offset="0.6" stopColor="#B8916A" />
-            <Stop offset="1" stopColor="#A67C52" />
-          </SvgLinearGradient>
+        {/* Game Canvas - SVG for everything */}
+        <Svg
+          width={WORLD_WIDTH * board.scale}
+          height={WORLD_HEIGHT * board.scale}
+          viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`}
+        >
+          {/* Definitions for gradients and patterns */}
+          <Defs>
+            {/* Wood grain pattern */}
+            <SvgLinearGradient id="woodGradient" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#D4A574" />
+              <Stop offset="0.3" stopColor="#C49A6C" />
+              <Stop offset="0.6" stopColor="#B8916A" />
+              <Stop offset="1" stopColor="#A67C52" />
+            </SvgLinearGradient>
           
-          {/* Desk edge shadow */}
-          <SvgLinearGradient id="deskEdge" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#8B5A2B" />
-            <Stop offset="1" stopColor="#5D3A1A" />
-          </SvgLinearGradient>
+            {/* Desk edge shadow */}
+            <SvgLinearGradient id="deskEdge" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#8B5A2B" />
+              <Stop offset="1" stopColor="#5D3A1A" />
+            </SvgLinearGradient>
           
-          {/* Pen body gradients */}
-          <SvgLinearGradient id="penBlueGrad" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#4A7CB8" />
-            <Stop offset="0.5" stopColor="#1E40AF" />
-            <Stop offset="1" stopColor="#1E3A8A" />
-          </SvgLinearGradient>
+            {/* Pen body gradients */}
+            <SvgLinearGradient id="penBlueGrad" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#4A7CB8" />
+              <Stop offset="0.5" stopColor="#1E40AF" />
+              <Stop offset="1" stopColor="#1E3A8A" />
+            </SvgLinearGradient>
           
-          <SvgLinearGradient id="penDarkGrad" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#4A4A4A" />
-            <Stop offset="0.5" stopColor="#1F2937" />
-            <Stop offset="1" stopColor="#111827" />
-          </SvgLinearGradient>
+            <SvgLinearGradient id="penDarkGrad" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#4A4A4A" />
+              <Stop offset="0.5" stopColor="#1F2937" />
+              <Stop offset="1" stopColor="#111827" />
+            </SvgLinearGradient>
           
-          <SvgLinearGradient id="penRedGrad" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#EF4444" />
-            <Stop offset="0.5" stopColor="#DC2626" />
-            <Stop offset="1" stopColor="#B91C1C" />
-          </SvgLinearGradient>
+            <SvgLinearGradient id="penRedGrad" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#EF4444" />
+              <Stop offset="0.5" stopColor="#DC2626" />
+              <Stop offset="1" stopColor="#B91C1C" />
+            </SvgLinearGradient>
           
-          <SvgLinearGradient id="penGreenGrad" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#10B981" />
-            <Stop offset="0.5" stopColor="#059669" />
-            <Stop offset="1" stopColor="#047857" />
-          </SvgLinearGradient>
+            <SvgLinearGradient id="penGreenGrad" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#10B981" />
+              <Stop offset="0.5" stopColor="#059669" />
+              <Stop offset="1" stopColor="#047857" />
+            </SvgLinearGradient>
           
-          <SvgLinearGradient id="penYellowGrad" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#FBBF24" />
-            <Stop offset="0.5" stopColor="#F59E0B" />
-            <Stop offset="1" stopColor="#D97706" />
-          </SvgLinearGradient>
+            <SvgLinearGradient id="penYellowGrad" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#FBBF24" />
+              <Stop offset="0.5" stopColor="#F59E0B" />
+              <Stop offset="1" stopColor="#D97706" />
+            </SvgLinearGradient>
           
-          {/* Metallic cap gradient */}
-          <SvgLinearGradient id="metallicGold" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#FFD700" />
-            <Stop offset="0.3" stopColor="#DAA520" />
-            <Stop offset="0.6" stopColor="#B8860B" />
-            <Stop offset="1" stopColor="#8B6914" />
-          </SvgLinearGradient>
+            {/* Metallic cap gradient */}
+            <SvgLinearGradient id="metallicGold" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#FFD700" />
+              <Stop offset="0.3" stopColor="#DAA520" />
+              <Stop offset="0.6" stopColor="#B8860B" />
+              <Stop offset="1" stopColor="#8B6914" />
+            </SvgLinearGradient>
           
-          <SvgLinearGradient id="metallicSilver" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#E8E8E8" />
-            <Stop offset="0.3" stopColor="#C0C0C0" />
-            <Stop offset="0.6" stopColor="#A0A0A0" />
-            <Stop offset="1" stopColor="#808080" />
-          </SvgLinearGradient>
+            <SvgLinearGradient id="metallicSilver" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#E8E8E8" />
+              <Stop offset="0.3" stopColor="#C0C0C0" />
+              <Stop offset="0.6" stopColor="#A0A0A0" />
+              <Stop offset="1" stopColor="#808080" />
+            </SvgLinearGradient>
           
-          {/* Geometry box gradient */}
-          <SvgLinearGradient id="geoBoxGrad" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#3B82F6" />
-            <Stop offset="0.5" stopColor="#2563EB" />
-            <Stop offset="1" stopColor="#1D4ED8" />
-          </SvgLinearGradient>
+            {/* Geometry box gradient */}
+            <SvgLinearGradient id="geoBoxGrad" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#3B82F6" />
+              <Stop offset="0.5" stopColor="#2563EB" />
+              <Stop offset="1" stopColor="#1D4ED8" />
+            </SvgLinearGradient>
           
-          {/* Eraser gradient */}
-          <SvgLinearGradient id="eraserGrad" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#FDA4AF" />
-            <Stop offset="0.5" stopColor="#FB7185" />
-            <Stop offset="1" stopColor="#F43F5E" />
-          </SvgLinearGradient>
+            {/* Eraser gradient */}
+            <SvgLinearGradient id="eraserGrad" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#FDA4AF" />
+              <Stop offset="0.5" stopColor="#FB7185" />
+              <Stop offset="1" stopColor="#F43F5E" />
+            </SvgLinearGradient>
           
-          {/* Notebook paper */}
-          <SvgLinearGradient id="paperGrad" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#FFFEF0" />
-            <Stop offset="1" stopColor="#F5F0DC" />
-          </SvgLinearGradient>
-        </Defs>
+            {/* Notebook paper */}
+            <SvgLinearGradient id="paperGrad" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#FFFEF0" />
+              <Stop offset="1" stopColor="#F5F0DC" />
+            </SvgLinearGradient>
+          </Defs>
 
-        {/* Desk shadow */}
-        <Rect
-          x={DESK_X + 4}
-          y={DESK_Y + 4}
-          width={DESK_WIDTH}
-          height={DESK_HEIGHT}
-          fill="rgba(0,0,0,0.3)"
-          rx={10}
-        />
-        
-        {/* Desk main surface */}
-        <Rect
-          x={DESK_X}
-          y={DESK_Y}
-          width={DESK_WIDTH}
-          height={DESK_HEIGHT}
-          fill="url(#woodGradient)"
-          rx={8}
-        />
-        
-        {/* Desk border/edge */}
-        <Rect
-          x={DESK_X}
-          y={DESK_Y}
-          width={DESK_WIDTH}
-          height={DESK_HEIGHT}
-          fill="none"
-          stroke="url(#deskEdge)"
-          strokeWidth={5}
-          rx={8}
-        />
-        
-        {/* Wood grain texture - horizontal lines */}
-        {Array.from({ length: 20 }).map((_, i) => (
-          <Line
-            key={`grain-h-${i}`}
-            x1={DESK_X + 5}
-            y1={DESK_Y + 10 + i * (DESK_HEIGHT / 20)}
-            x2={DESK_X + DESK_WIDTH - 5}
-            y2={DESK_Y + 10 + i * (DESK_HEIGHT / 20) + (Math.sin(i) * 3)}
-            stroke="rgba(139, 69, 19, 0.15)"
-            strokeWidth={1}
-          />
-        ))}
-        
-        {/* Wood knots */}
-        <Ellipse cx={DESK_X + 60} cy={DESK_Y + 120} rx={12} ry={8} fill="rgba(101, 67, 33, 0.25)" />
-        <Ellipse cx={DESK_X + DESK_WIDTH - 80} cy={DESK_Y + DESK_HEIGHT - 100} rx={10} ry={6} fill="rgba(101, 67, 33, 0.2)" />
-        
-        {/* Scribbles and doodles - more realistic school doodles */}
-        <SvgText x={DESK_X + 20} y={DESK_Y + 40} fill="rgba(30, 64, 175, 0.4)" fontSize={9} fontFamily="serif">
-          a² + b² = c²
-        </SvgText>
-        <SvgText x={DESK_X + DESK_WIDTH - 85} y={DESK_Y + 75} fill="rgba(220, 38, 38, 0.35)" fontSize={10}>
-          ♥ BFF ♥
-        </SvgText>
-        <SvgText x={DESK_X + 30} y={DESK_Y + DESK_HEIGHT - 40} fill="rgba(22, 163, 74, 0.3)" fontSize={8}>
-          Class X-B
-        </SvgText>
-        
-        {/* Compass circle doodle */}
-        <Circle cx={DESK_X + DESK_WIDTH - 50} cy={DESK_Y + 50} r={15} fill="none" stroke="rgba(75, 85, 99, 0.25)" strokeWidth={1} strokeDasharray="2,2" />
-        <Circle cx={DESK_X + DESK_WIDTH - 50} cy={DESK_Y + 50} r={2} fill="rgba(75, 85, 99, 0.3)" />
-        
-        {/* Scratches on desk */}
-        <Line x1={DESK_X + 100} y1={DESK_Y + 80} x2={DESK_X + 140} y2={DESK_Y + 85} stroke="rgba(139, 69, 19, 0.2)" strokeWidth={1} />
-        <Line x1={DESK_X + DESK_WIDTH/2} y1={DESK_Y + DESK_HEIGHT/2 - 20} x2={DESK_X + DESK_WIDTH/2 + 30} y2={DESK_Y + DESK_HEIGHT/2 - 15} stroke="rgba(139, 69, 19, 0.15)" strokeWidth={1} />
-        
-        {/* Obstacles - Enhanced realistic school items */}
-        {obstacles.map((obs) => {
-          const cx = obs.x + obs.width/2;
-          const cy = obs.y + obs.height/2;
-          
-          switch (obs.type) {
-            case 'geometryBox':
-              return (
-                <G key={obs.id} transform={`rotate(${obs.rotation}, ${cx}, ${cy})`}>
-                  {/* Box shadow */}
-                  <Rect x={obs.x + 2} y={obs.y + 2} width={obs.width} height={obs.height} fill="rgba(0,0,0,0.3)" rx={4} />
-                  {/* Main box body */}
-                  <Rect x={obs.x} y={obs.y} width={obs.width} height={obs.height} fill="url(#geoBoxGrad)" rx={4} />
-                  {/* Box lid line */}
-                  <Line x1={obs.x + 2} y1={obs.y + obs.height * 0.35} x2={obs.x + obs.width - 2} y2={obs.y + obs.height * 0.35} stroke="rgba(0,0,0,0.3)" strokeWidth={1} />
-                  {/* Label area */}
-                  <Rect x={obs.x + 5} y={obs.y + 4} width={obs.width - 10} height={8} fill="#FFFEF0" rx={1} />
-                  {/* Label decoration (no brand) */}
-                  <Line x1={obs.x + 8} y1={obs.y + 8} x2={obs.x + obs.width - 8} y2={obs.y + 8} stroke="rgba(30, 64, 175, 0.3)" strokeWidth={0.5} />
-                  {/* Metallic clasp */}
-                  <Rect x={obs.x + obs.width/2 - 4} y={obs.y + obs.height - 6} width={8} height={4} fill="url(#metallicSilver)" rx={1} />
-                  {/* Edge highlight */}
-                  <Rect x={obs.x} y={obs.y} width={obs.width} height={obs.height} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={1} rx={4} />
-                </G>
-              );
-            case 'notebook':
-              return (
-                <G key={obs.id} transform={`rotate(${obs.rotation}, ${cx}, ${cy})`}>
-                  {/* Shadow */}
-                  <Rect x={obs.x + 2} y={obs.y + 2} width={obs.width} height={obs.height} fill="rgba(0,0,0,0.25)" rx={2} />
-                  {/* Cover */}
-                  <Rect x={obs.x} y={obs.y} width={obs.width} height={obs.height} fill="url(#paperGrad)" rx={2} />
-                  {/* Red margin line */}
-                  <Line x1={obs.x + 10} y1={obs.y + 2} x2={obs.x + 10} y2={obs.y + obs.height - 2} stroke="rgba(239, 68, 68, 0.5)" strokeWidth={1} />
-                  {/* Blue ruled lines */}
-                  {[0, 1, 2, 3, 4].map((i) => (
-                    <Line
-                      key={i}
-                      x1={obs.x + 3}
-                      y1={obs.y + 8 + i * 8}
-                      x2={obs.x + obs.width - 3}
-                      y2={obs.y + 8 + i * 8}
-                      stroke="rgba(59, 130, 246, 0.4)"
-                      strokeWidth={0.5}
-                    />
-                  ))}
-                  {/* Spiral binding holes */}
-                  {[0, 1, 2].map((i) => (
-                    <Circle key={i} cx={obs.x + 4} cy={obs.y + 10 + i * 14} r={2} fill="#8B4513" />
-                  ))}
-                  {/* Written text scribble */}
-                  <SvgText x={obs.x + 14} y={obs.y + 14} fill="rgba(30, 64, 175, 0.5)" fontSize={4}>Notes</SvgText>
-                </G>
-              );
-            case 'eraser':
-              return (
-                <G key={obs.id} transform={`rotate(${obs.rotation}, ${cx}, ${cy})`}>
-                  {/* Shadow */}
-                  <Rect x={obs.x + 1} y={obs.y + 1} width={obs.width} height={obs.height} fill="rgba(0,0,0,0.25)" rx={2} />
-                  {/* Main eraser body */}
-                  <Rect x={obs.x} y={obs.y} width={obs.width} height={obs.height} fill="url(#eraserGrad)" rx={2} />
-                  {/* Paper sleeve */}
-                  <Rect x={obs.x + 2} y={obs.y + 2} width={obs.width - 4} height={obs.height - 4} fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth={0.5} rx={1} />
-                  {/* Simple marking line (no brand) */}
-                  <Line x1={obs.x + 4} y1={cy} x2={obs.x + obs.width - 4} y2={cy} stroke="rgba(255,255,255,0.5)" strokeWidth={0.5} />
-                  {/* Used edge - darker */}
-                  <Rect x={obs.x} y={obs.y} width={4} height={obs.height} fill="rgba(0,0,0,0.15)" rx={2} />
-                </G>
-              );
-            default:
-              return null;
-          }
-        })}
-
-        {/* Player Pen - Enhanced realistic pen */}
-        <G transform={`rotate(${(playerPos.angle * 180) / Math.PI}, ${playerPos.x}, ${playerPos.y})`}>
-          {/* Pen shadow */}
-          <Ellipse cx={playerPos.x} cy={playerPos.y + 10} rx={PEN_LENGTH/2 - 5} ry={4} fill="rgba(0,0,0,0.2)" />
-          
-          {/* Main pen body */}
+          {/* Desk shadow */}
           <Rect
-            x={playerPos.x - PEN_LENGTH/2}
-            y={playerPos.y - PEN_WIDTH/2}
-            width={PEN_LENGTH}
-            height={PEN_WIDTH}
-            fill={playerPen.id === 'classic' ? 'url(#penBlueGrad)' : 
-                  playerPen.id === 'heavyweight' ? 'url(#penDarkGrad)' :
-                  playerPen.id === 'acrobat' ? 'url(#penRedGrad)' :
-                  playerPen.id === 'natraj' ? 'url(#penYellowGrad)' :
-                  'url(#penGreenGrad)'}
-            rx={PEN_WIDTH/2}
+            x={DESK_X + 4}
+            y={DESK_Y + 4}
+            width={DESK_WIDTH}
+            height={DESK_HEIGHT}
+            fill="rgba(0,0,0,0.3)"
+            rx={10}
           />
-          
-          {/* Pen body highlight */}
+        
+          {/* Desk main surface */}
           <Rect
-            x={playerPos.x - PEN_LENGTH/2 + 2}
-            y={playerPos.y - PEN_WIDTH/2 + 1}
-            width={PEN_LENGTH - 4}
-            height={3}
-            fill="rgba(255,255,255,0.25)"
-            rx={2}
+            x={DESK_X}
+            y={DESK_Y}
+            width={DESK_WIDTH}
+            height={DESK_HEIGHT}
+            fill="url(#woodGradient)"
+            rx={8}
           />
-          
-          {/* Grip section */}
+        
+          {/* Desk border/edge */}
           <Rect
-            x={playerPos.x - 15}
-            y={playerPos.y - PEN_WIDTH/2}
-            width={25}
-            height={PEN_WIDTH}
-            fill="rgba(0,0,0,0.15)"
-            rx={2}
+            x={DESK_X}
+            y={DESK_Y}
+            width={DESK_WIDTH}
+            height={DESK_HEIGHT}
+            fill="none"
+            stroke="url(#deskEdge)"
+            strokeWidth={5}
+            rx={8}
           />
-          {/* Grip ridges */}
-          {[-12, -8, -4, 0, 4, 8].map((offset, i) => (
+        
+          {/* Wood grain texture - horizontal lines */}
+          {Array.from({ length: 20 }).map((_, i) => (
             <Line
-              key={i}
-              x1={playerPos.x + offset}
-              y1={playerPos.y - PEN_WIDTH/2}
-              x2={playerPos.x + offset}
-              y2={playerPos.y + PEN_WIDTH/2}
-              stroke="rgba(255,255,255,0.15)"
+              key={`grain-h-${i}`}
+              x1={DESK_X + 5}
+              y1={DESK_Y + 10 + i * (DESK_HEIGHT / 20)}
+              x2={DESK_X + DESK_WIDTH - 5}
+              y2={DESK_Y + 10 + i * (DESK_HEIGHT / 20) + (Math.sin(i) * 3)}
+              stroke="rgba(139, 69, 19, 0.15)"
               strokeWidth={1}
             />
           ))}
+        
+          {/* Wood knots */}
+          <Ellipse cx={DESK_X + 60} cy={DESK_Y + 120} rx={12} ry={8} fill="rgba(101, 67, 33, 0.25)" />
+          <Ellipse cx={DESK_X + DESK_WIDTH - 80} cy={DESK_Y + DESK_HEIGHT - 100} rx={10} ry={6} fill="rgba(101, 67, 33, 0.2)" />
+        
+          {/* Scribbles and doodles - more realistic school doodles */}
+          <SvgText x={DESK_X + 20} y={DESK_Y + 40} fill="rgba(30, 64, 175, 0.4)" fontSize={9} fontFamily="serif">
+            a² + b² = c²
+          </SvgText>
+          <SvgText x={DESK_X + DESK_WIDTH - 85} y={DESK_Y + 75} fill="rgba(220, 38, 38, 0.35)" fontSize={10}>
+            ♥ BFF ♥
+          </SvgText>
+          <SvgText x={DESK_X + 30} y={DESK_Y + DESK_HEIGHT - 40} fill="rgba(22, 163, 74, 0.3)" fontSize={8}>
+            Class X-B
+          </SvgText>
+        
+          {/* Compass circle doodle */}
+          <Circle cx={DESK_X + DESK_WIDTH - 50} cy={DESK_Y + 50} r={15} fill="none" stroke="rgba(75, 85, 99, 0.25)" strokeWidth={1} strokeDasharray="2,2" />
+          <Circle cx={DESK_X + DESK_WIDTH - 50} cy={DESK_Y + 50} r={2} fill="rgba(75, 85, 99, 0.3)" />
+        
+          {/* Scratches on desk */}
+          <Line x1={DESK_X + 100} y1={DESK_Y + 80} x2={DESK_X + 140} y2={DESK_Y + 85} stroke="rgba(139, 69, 19, 0.2)" strokeWidth={1} />
+          <Line x1={DESK_X + DESK_WIDTH/2} y1={DESK_Y + DESK_HEIGHT/2 - 20} x2={DESK_X + DESK_WIDTH/2 + 30} y2={DESK_Y + DESK_HEIGHT/2 - 15} stroke="rgba(139, 69, 19, 0.15)" strokeWidth={1} />
+        
+          {/* Obstacles - Enhanced realistic school items */}
+          {obstacles.map((obs) => {
+            const cx = obs.x + obs.width/2;
+            const cy = obs.y + obs.height/2;
           
-          {/* Cap or Tip */}
-          {capOn ? (
+            switch (obs.type) {
+              case 'geometryBox':
+                return (
+                  <G key={obs.id} transform={`rotate(${obs.rotation}, ${cx}, ${cy})`}>
+                    {/* Box shadow */}
+                    <Rect x={obs.x + 2} y={obs.y + 2} width={obs.width} height={obs.height} fill="rgba(0,0,0,0.3)" rx={4} />
+                    {/* Main box body */}
+                    <Rect x={obs.x} y={obs.y} width={obs.width} height={obs.height} fill="url(#geoBoxGrad)" rx={4} />
+                    {/* Box lid line */}
+                    <Line x1={obs.x + 2} y1={obs.y + obs.height * 0.35} x2={obs.x + obs.width - 2} y2={obs.y + obs.height * 0.35} stroke="rgba(0,0,0,0.3)" strokeWidth={1} />
+                    {/* Label area */}
+                    <Rect x={obs.x + 5} y={obs.y + 4} width={obs.width - 10} height={8} fill="#FFFEF0" rx={1} />
+                    {/* Label decoration (no brand) */}
+                    <Line x1={obs.x + 8} y1={obs.y + 8} x2={obs.x + obs.width - 8} y2={obs.y + 8} stroke="rgba(30, 64, 175, 0.3)" strokeWidth={0.5} />
+                    {/* Metallic clasp */}
+                    <Rect x={obs.x + obs.width/2 - 4} y={obs.y + obs.height - 6} width={8} height={4} fill="url(#metallicSilver)" rx={1} />
+                    {/* Edge highlight */}
+                    <Rect x={obs.x} y={obs.y} width={obs.width} height={obs.height} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={1} rx={4} />
+                  </G>
+                );
+              case 'notebook':
+                return (
+                  <G key={obs.id} transform={`rotate(${obs.rotation}, ${cx}, ${cy})`}>
+                    {/* Shadow */}
+                    <Rect x={obs.x + 2} y={obs.y + 2} width={obs.width} height={obs.height} fill="rgba(0,0,0,0.25)" rx={2} />
+                    {/* Cover */}
+                    <Rect x={obs.x} y={obs.y} width={obs.width} height={obs.height} fill="url(#paperGrad)" rx={2} />
+                    {/* Red margin line */}
+                    <Line x1={obs.x + 10} y1={obs.y + 2} x2={obs.x + 10} y2={obs.y + obs.height - 2} stroke="rgba(239, 68, 68, 0.5)" strokeWidth={1} />
+                    {/* Blue ruled lines */}
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <Line
+                        key={i}
+                        x1={obs.x + 3}
+                        y1={obs.y + 8 + i * 8}
+                        x2={obs.x + obs.width - 3}
+                        y2={obs.y + 8 + i * 8}
+                        stroke="rgba(59, 130, 246, 0.4)"
+                        strokeWidth={0.5}
+                      />
+                    ))}
+                    {/* Spiral binding holes */}
+                    {[0, 1, 2].map((i) => (
+                      <Circle key={i} cx={obs.x + 4} cy={obs.y + 10 + i * 14} r={2} fill="#8B4513" />
+                    ))}
+                    {/* Written text scribble */}
+                    <SvgText x={obs.x + 14} y={obs.y + 14} fill="rgba(30, 64, 175, 0.5)" fontSize={4}>Notes</SvgText>
+                  </G>
+                );
+              case 'eraser':
+                return (
+                  <G key={obs.id} transform={`rotate(${obs.rotation}, ${cx}, ${cy})`}>
+                    {/* Shadow */}
+                    <Rect x={obs.x + 1} y={obs.y + 1} width={obs.width} height={obs.height} fill="rgba(0,0,0,0.25)" rx={2} />
+                    {/* Main eraser body */}
+                    <Rect x={obs.x} y={obs.y} width={obs.width} height={obs.height} fill="url(#eraserGrad)" rx={2} />
+                    {/* Paper sleeve */}
+                    <Rect x={obs.x + 2} y={obs.y + 2} width={obs.width - 4} height={obs.height - 4} fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth={0.5} rx={1} />
+                    {/* Simple marking line (no brand) */}
+                    <Line x1={obs.x + 4} y1={cy} x2={obs.x + obs.width - 4} y2={cy} stroke="rgba(255,255,255,0.5)" strokeWidth={0.5} />
+                    {/* Used edge - darker */}
+                    <Rect x={obs.x} y={obs.y} width={4} height={obs.height} fill="rgba(0,0,0,0.15)" rx={2} />
+                  </G>
+                );
+              default:
+                return null;
+            }
+          })}
+
+          {/* Player Pen - Enhanced realistic pen */}
+          <G transform={`rotate(${(playerPos.angle * 180) / Math.PI}, ${playerPos.x}, ${playerPos.y})`}>
+            {/* Pen shadow */}
+            <Ellipse cx={playerPos.x} cy={playerPos.y + 10} rx={PEN_LENGTH/2 - 5} ry={4} fill="rgba(0,0,0,0.2)" />
+          
+            {/* Main pen body */}
+            <Rect
+              x={playerPos.x - PEN_LENGTH/2}
+              y={playerPos.y - PEN_WIDTH/2}
+              width={PEN_LENGTH}
+              height={PEN_WIDTH}
+              fill={playerPen.id === 'classic' ? 'url(#penBlueGrad)' : 
+                    playerPen.id === 'heavyweight' ? 'url(#penDarkGrad)' :
+                    playerPen.id === 'acrobat' ? 'url(#penRedGrad)' :
+                    playerPen.id === 'natraj' ? 'url(#penYellowGrad)' :
+                    'url(#penGreenGrad)'}
+              rx={PEN_WIDTH/2}
+            />
+          
+            {/* Pen body highlight */}
+            <Rect
+              x={playerPos.x - PEN_LENGTH/2 + 2}
+              y={playerPos.y - PEN_WIDTH/2 + 1}
+              width={PEN_LENGTH - 4}
+              height={3}
+              fill="rgba(255,255,255,0.25)"
+              rx={2}
+            />
+          
+            {/* Grip section */}
+            <Rect
+              x={playerPos.x - 15}
+              y={playerPos.y - PEN_WIDTH/2}
+              width={25}
+              height={PEN_WIDTH}
+              fill="rgba(0,0,0,0.15)"
+              rx={2}
+            />
+            {/* Grip ridges */}
+            {[-12, -8, -4, 0, 4, 8].map((offset, i) => (
+              <Line
+                key={i}
+                x1={playerPos.x + offset}
+                y1={playerPos.y - PEN_WIDTH/2}
+                x2={playerPos.x + offset}
+                y2={playerPos.y + PEN_WIDTH/2}
+                stroke="rgba(255,255,255,0.15)"
+                strokeWidth={1}
+              />
+            ))}
+          
+            {/* Cap or Tip */}
+            {capOn ? (
+              <G>
+                {/* Cap body */}
+                <Rect
+                  x={playerPos.x + PEN_LENGTH/2 - 8}
+                  y={playerPos.y - PEN_WIDTH/2 - 1}
+                  width={25}
+                  height={PEN_WIDTH + 2}
+                  fill={playerPen.id === 'heavyweight' ? 'url(#metallicGold)' : playerPen.secondaryColor}
+                  rx={PEN_WIDTH/2}
+                />
+                {/* Cap clip */}
+                <Rect
+                  x={playerPos.x + PEN_LENGTH/2 + 5}
+                  y={playerPos.y - PEN_WIDTH/2 - 3}
+                  width={12}
+                  height={3}
+                  fill={playerPen.id === 'heavyweight' ? 'url(#metallicGold)' : playerPen.secondaryColor}
+                  rx={1}
+                />
+                {/* Cap ring */}
+                <Line
+                  x1={playerPos.x + PEN_LENGTH/2 - 5}
+                  y1={playerPos.y - PEN_WIDTH/2}
+                  x2={playerPos.x + PEN_LENGTH/2 - 5}
+                  y2={playerPos.y + PEN_WIDTH/2}
+                  stroke="rgba(255,255,255,0.4)"
+                  strokeWidth={2}
+                />
+              </G>
+            ) : (
+              <G>
+                {/* Pen tip cone */}
+                <Path
+                  d={`M ${playerPos.x + PEN_LENGTH/2 - 5} ${playerPos.y - PEN_WIDTH/2} 
+                      L ${playerPos.x + PEN_LENGTH/2 + 15} ${playerPos.y} 
+                      L ${playerPos.x + PEN_LENGTH/2 - 5} ${playerPos.y + PEN_WIDTH/2} Z`}
+                  fill="url(#metallicSilver)"
+                />
+                {/* Tip point */}
+                <Circle cx={playerPos.x + PEN_LENGTH/2 + 14} cy={playerPos.y} r={1.5} fill="#333" />
+              </G>
+            )}
+          
+            {/* Back end of pen */}
+            <Ellipse
+              cx={playerPos.x - PEN_LENGTH/2}
+              cy={playerPos.y}
+              rx={3}
+              ry={PEN_WIDTH/2}
+              fill="rgba(0,0,0,0.2)"
+            />
+          </G>
+
+          {/* AI Pen - Enhanced realistic pen */}
+          <G transform={`rotate(${(aiPos.angle * 180) / Math.PI}, ${aiPos.x}, ${aiPos.y})`}>
+            {/* Pen shadow */}
+            <Ellipse cx={aiPos.x} cy={aiPos.y + 10} rx={PEN_LENGTH/2 - 5} ry={4} fill="rgba(0,0,0,0.2)" />
+          
+            {/* Main pen body */}
+            <Rect
+              x={aiPos.x - PEN_LENGTH/2}
+              y={aiPos.y - PEN_WIDTH/2}
+              width={PEN_LENGTH}
+              height={PEN_WIDTH}
+              fill={aiPen.id === 'classic' ? 'url(#penBlueGrad)' : 
+                    aiPen.id === 'heavyweight' ? 'url(#penDarkGrad)' :
+                    aiPen.id === 'acrobat' ? 'url(#penRedGrad)' :
+                    aiPen.id === 'natraj' ? 'url(#penYellowGrad)' :
+                    'url(#penGreenGrad)'}
+              rx={PEN_WIDTH/2}
+            />
+          
+            {/* Pen body highlight */}
+            <Rect
+              x={aiPos.x - PEN_LENGTH/2 + 2}
+              y={aiPos.y - PEN_WIDTH/2 + 1}
+              width={PEN_LENGTH - 4}
+              height={3}
+              fill="rgba(255,255,255,0.25)"
+              rx={2}
+            />
+          
+            {/* Grip section */}
+            <Rect
+              x={aiPos.x - 15}
+              y={aiPos.y - PEN_WIDTH/2}
+              width={25}
+              height={PEN_WIDTH}
+              fill="rgba(0,0,0,0.15)"
+              rx={2}
+            />
+            {/* Grip ridges */}
+            {[-12, -8, -4, 0, 4, 8].map((offset, i) => (
+              <Line
+                key={i}
+                x1={aiPos.x + offset}
+                y1={aiPos.y - PEN_WIDTH/2}
+                x2={aiPos.x + offset}
+                y2={aiPos.y + PEN_WIDTH/2}
+                stroke="rgba(255,255,255,0.15)"
+                strokeWidth={1}
+              />
+            ))}
+          
+            {/* AI pen always has cap */}
             <G>
               {/* Cap body */}
               <Rect
-                x={playerPos.x + PEN_LENGTH/2 - 8}
-                y={playerPos.y - PEN_WIDTH/2 - 1}
+                x={aiPos.x + PEN_LENGTH/2 - 8}
+                y={aiPos.y - PEN_WIDTH/2 - 1}
                 width={25}
                 height={PEN_WIDTH + 2}
-                fill={playerPen.id === 'heavyweight' ? 'url(#metallicGold)' : playerPen.secondaryColor}
+                fill={aiPen.id === 'heavyweight' ? 'url(#metallicGold)' : aiPen.secondaryColor}
                 rx={PEN_WIDTH/2}
               />
               {/* Cap clip */}
               <Rect
-                x={playerPos.x + PEN_LENGTH/2 + 5}
-                y={playerPos.y - PEN_WIDTH/2 - 3}
+                x={aiPos.x + PEN_LENGTH/2 + 5}
+                y={aiPos.y - PEN_WIDTH/2 - 3}
                 width={12}
                 height={3}
-                fill={playerPen.id === 'heavyweight' ? 'url(#metallicGold)' : playerPen.secondaryColor}
+                fill={aiPen.id === 'heavyweight' ? 'url(#metallicGold)' : aiPen.secondaryColor}
                 rx={1}
               />
               {/* Cap ring */}
               <Line
-                x1={playerPos.x + PEN_LENGTH/2 - 5}
-                y1={playerPos.y - PEN_WIDTH/2}
-                x2={playerPos.x + PEN_LENGTH/2 - 5}
-                y2={playerPos.y + PEN_WIDTH/2}
+                x1={aiPos.x + PEN_LENGTH/2 - 5}
+                y1={aiPos.y - PEN_WIDTH/2}
+                x2={aiPos.x + PEN_LENGTH/2 - 5}
+                y2={aiPos.y + PEN_WIDTH/2}
                 stroke="rgba(255,255,255,0.4)"
                 strokeWidth={2}
               />
             </G>
-          ) : (
+          
+            {/* Back end of pen */}
+            <Ellipse
+              cx={aiPos.x - PEN_LENGTH/2}
+              cy={aiPos.y}
+              rx={3}
+              ry={PEN_WIDTH/2}
+              fill="rgba(0,0,0,0.2)"
+            />
+          </G>
+
+          {/* Aiming UI */}
+          {isAiming && (
             <G>
-              {/* Pen tip cone */}
-              <Path
-                d={`M ${playerPos.x + PEN_LENGTH/2 - 5} ${playerPos.y - PEN_WIDTH/2} 
-                    L ${playerPos.x + PEN_LENGTH/2 + 15} ${playerPos.y} 
-                    L ${playerPos.x + PEN_LENGTH/2 - 5} ${playerPos.y + PEN_WIDTH/2} Z`}
-                fill="url(#metallicSilver)"
+              {/* Touch point indicator */}
+              <Circle
+                cx={hitPoint.x}
+                cy={hitPoint.y}
+                r={12}
+                fill="none"
+                stroke="#FFF"
+                strokeWidth={2}
+                opacity={0.8}
               />
-              {/* Tip point */}
-              <Circle cx={playerPos.x + PEN_LENGTH/2 + 14} cy={playerPos.y} r={1.5} fill="#333" />
+            
+              {/* Pull-back line */}
+              <Line
+                x1={hitPoint.x}
+                y1={hitPoint.y}
+                x2={touchCurrent.x}
+                y2={touchCurrent.y}
+                stroke={powerColor}
+                strokeWidth={4}
+                strokeDasharray="10,5"
+                opacity={0.9}
+              />
+            
+              {/* Direction arrow (where pen will go) */}
+              {power > 0.1 && (
+                <>
+                  <Line
+                    x1={hitPoint.x}
+                    y1={hitPoint.y}
+                    x2={hitPoint.x + normalizedAim.dx * 80 * power}
+                    y2={hitPoint.y + normalizedAim.dy * 80 * power}
+                    stroke="#FFF"
+                    strokeWidth={3}
+                    opacity={0.8}
+                  />
+                  {/* Arrow head */}
+                  <Circle
+                    cx={hitPoint.x + normalizedAim.dx * 80 * power}
+                    cy={hitPoint.y + normalizedAim.dy * 80 * power}
+                    r={6}
+                    fill="#FFF"
+                    opacity={0.8}
+                  />
+                
+                  {/* Trajectory dots */}
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Circle
+                      key={i}
+                      cx={hitPoint.x + normalizedAim.dx * (80 + i * 25) * power}
+                      cy={hitPoint.y + normalizedAim.dy * (80 + i * 25) * power}
+                      r={4 - i * 0.5}
+                      fill="#FFF"
+                      opacity={0.6 - i * 0.1}
+                    />
+                  ))}
+                </>
+              )}
+            
+              {/* Power indicator at touch point */}
+              <Circle
+                cx={touchCurrent.x}
+                cy={touchCurrent.y}
+                r={25 + power * 20}
+                fill="none"
+                stroke={powerColor}
+                strokeWidth={3}
+                opacity={0.7}
+              />
             </G>
           )}
-          
-          {/* Back end of pen */}
-          <Ellipse
-            cx={playerPos.x - PEN_LENGTH/2}
-            cy={playerPos.y}
-            rx={3}
-            ry={PEN_WIDTH/2}
-            fill="rgba(0,0,0,0.2)"
-          />
-        </G>
+        </Svg>
+      </View>
 
-        {/* AI Pen - Enhanced realistic pen */}
-        <G transform={`rotate(${(aiPos.angle * 180) / Math.PI}, ${aiPos.x}, ${aiPos.y})`}>
-          {/* Pen shadow */}
-          <Ellipse cx={aiPos.x} cy={aiPos.y + 10} rx={PEN_LENGTH/2 - 5} ry={4} fill="rgba(0,0,0,0.2)" />
-          
-          {/* Main pen body */}
-          <Rect
-            x={aiPos.x - PEN_LENGTH/2}
-            y={aiPos.y - PEN_WIDTH/2}
-            width={PEN_LENGTH}
-            height={PEN_WIDTH}
-            fill={aiPen.id === 'classic' ? 'url(#penBlueGrad)' : 
-                  aiPen.id === 'heavyweight' ? 'url(#penDarkGrad)' :
-                  aiPen.id === 'acrobat' ? 'url(#penRedGrad)' :
-                  aiPen.id === 'natraj' ? 'url(#penYellowGrad)' :
-                  'url(#penGreenGrad)'}
-            rx={PEN_WIDTH/2}
-          />
-          
-          {/* Pen body highlight */}
-          <Rect
-            x={aiPos.x - PEN_LENGTH/2 + 2}
-            y={aiPos.y - PEN_WIDTH/2 + 1}
-            width={PEN_LENGTH - 4}
-            height={3}
-            fill="rgba(255,255,255,0.25)"
-            rx={2}
-          />
-          
-          {/* Grip section */}
-          <Rect
-            x={aiPos.x - 15}
-            y={aiPos.y - PEN_WIDTH/2}
-            width={25}
-            height={PEN_WIDTH}
-            fill="rgba(0,0,0,0.15)"
-            rx={2}
-          />
-          {/* Grip ridges */}
-          {[-12, -8, -4, 0, 4, 8].map((offset, i) => (
-            <Line
-              key={i}
-              x1={aiPos.x + offset}
-              y1={aiPos.y - PEN_WIDTH/2}
-              x2={aiPos.x + offset}
-              y2={aiPos.y + PEN_WIDTH/2}
-              stroke="rgba(255,255,255,0.15)"
-              strokeWidth={1}
-            />
-          ))}
-          
-          {/* AI pen always has cap */}
-          <G>
-            {/* Cap body */}
-            <Rect
-              x={aiPos.x + PEN_LENGTH/2 - 8}
-              y={aiPos.y - PEN_WIDTH/2 - 1}
-              width={25}
-              height={PEN_WIDTH + 2}
-              fill={aiPen.id === 'heavyweight' ? 'url(#metallicGold)' : aiPen.secondaryColor}
-              rx={PEN_WIDTH/2}
-            />
-            {/* Cap clip */}
-            <Rect
-              x={aiPos.x + PEN_LENGTH/2 + 5}
-              y={aiPos.y - PEN_WIDTH/2 - 3}
-              width={12}
-              height={3}
-              fill={aiPen.id === 'heavyweight' ? 'url(#metallicGold)' : aiPen.secondaryColor}
-              rx={1}
-            />
-            {/* Cap ring */}
-            <Line
-              x1={aiPos.x + PEN_LENGTH/2 - 5}
-              y1={aiPos.y - PEN_WIDTH/2}
-              x2={aiPos.x + PEN_LENGTH/2 - 5}
-              y2={aiPos.y + PEN_WIDTH/2}
-              stroke="rgba(255,255,255,0.4)"
-              strokeWidth={2}
-            />
-          </G>
-          
-          {/* Back end of pen */}
-          <Ellipse
-            cx={aiPos.x - PEN_LENGTH/2}
-            cy={aiPos.y}
-            rx={3}
-            ry={PEN_WIDTH/2}
-            fill="rgba(0,0,0,0.2)"
-          />
-        </G>
+      {/* Power-ups - the row always keeps its space so the board doesn't jump between turns */}
+      <View style={styles.powerUps}>
+        {isPlayerTurn && !isAnimating && !showResult && (
+          <>
+            <TouchableOpacity
+              style={[styles.powerUpBtn, (!hasRefillPower || refillActive) && styles.powerUpDisabled]}
+              onPress={handleRefillPower}
+              disabled={!hasRefillPower || refillActive}
+            >
+              <Ionicons name="flash" size={20} color={hasRefillPower && !refillActive ? '#F59E0B' : '#666'} />
+              <Text style={[styles.powerUpText, (!hasRefillPower || refillActive) && styles.powerUpTextDisabled]}>
+                {refillActive ? 'Active!' : 'Refill'}
+              </Text>
+            </TouchableOpacity>
 
-        {/* Aiming UI */}
-        {isAiming && (
-          <G>
-            {/* Touch point indicator */}
-            <Circle
-              cx={hitPoint.x}
-              cy={hitPoint.y}
-              r={12}
-              fill="none"
-              stroke="#FFF"
-              strokeWidth={2}
-              opacity={0.8}
-            />
-            
-            {/* Pull-back line */}
-            <Line
-              x1={hitPoint.x}
-              y1={hitPoint.y}
-              x2={touchCurrent.x}
-              y2={touchCurrent.y}
-              stroke={powerColor}
-              strokeWidth={4}
-              strokeDasharray="10,5"
-              opacity={0.9}
-            />
-            
-            {/* Direction arrow (where pen will go) */}
-            {power > 0.1 && (
-              <>
-                <Line
-                  x1={hitPoint.x}
-                  y1={hitPoint.y}
-                  x2={hitPoint.x + normalizedAim.dx * 80 * power}
-                  y2={hitPoint.y + normalizedAim.dy * 80 * power}
-                  stroke="#FFF"
-                  strokeWidth={3}
-                  opacity={0.8}
-                />
-                {/* Arrow head */}
-                <Circle
-                  cx={hitPoint.x + normalizedAim.dx * 80 * power}
-                  cy={hitPoint.y + normalizedAim.dy * 80 * power}
-                  r={6}
-                  fill="#FFF"
-                  opacity={0.8}
-                />
-                
-                {/* Trajectory dots */}
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <Circle
-                    key={i}
-                    cx={hitPoint.x + normalizedAim.dx * (80 + i * 25) * power}
-                    cy={hitPoint.y + normalizedAim.dy * (80 + i * 25) * power}
-                    r={4 - i * 0.5}
-                    fill="#FFF"
-                    opacity={0.6 - i * 0.1}
-                  />
-                ))}
-              </>
-            )}
-            
-            {/* Power indicator at touch point */}
-            <Circle
-              cx={touchCurrent.x}
-              cy={touchCurrent.y}
-              r={25 + power * 20}
-              fill="none"
-              stroke={powerColor}
-              strokeWidth={3}
-              opacity={0.7}
-            />
-          </G>
+            <TouchableOpacity style={styles.powerUpBtn} onPress={toggleCap}>
+              <Ionicons name={capOn ? 'lock-closed' : 'lock-open'} size={20} color="#3B82F6" />
+              <Text style={styles.powerUpText}>{capOn ? 'Cap On' : 'Cap Off'}</Text>
+            </TouchableOpacity>
+          </>
         )}
-      </Svg>
-
-      {/* Power-ups */}
-      {isPlayerTurn && !isAnimating && !showResult && (
-        <View style={styles.powerUps}>
-          <TouchableOpacity
-            style={[styles.powerUpBtn, (!hasRefillPower || refillActive) && styles.powerUpDisabled]}
-            onPress={handleRefillPower}
-            disabled={!hasRefillPower || refillActive}
-          >
-            <Ionicons name="flash" size={20} color={hasRefillPower && !refillActive ? '#F59E0B' : '#666'} />
-            <Text style={[styles.powerUpText, (!hasRefillPower || refillActive) && styles.powerUpTextDisabled]}>
-              {refillActive ? 'Active!' : 'Refill'}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.powerUpBtn} onPress={toggleCap}>
-            <Ionicons name={capOn ? 'lock-closed' : 'lock-open'} size={20} color="#3B82F6" />
-            <Text style={styles.powerUpText}>{capOn ? 'Cap On' : 'Cap Off'}</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      </View>
 
       {/* Round Result Modal */}
       <Modal visible={showResult && gameStatus === 'playing'} transparent animationType="fade">
@@ -1222,16 +1279,12 @@ const styles = StyleSheet.create({
   background: {
     ...StyleSheet.absoluteFillObject,
   },
-  canvas: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
+  board: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   hud: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
     paddingTop: 50,
     paddingHorizontal: 16,
     paddingBottom: 8,
@@ -1288,10 +1341,6 @@ const styles = StyleSheet.create({
     fontSize: 9,
   },
   turnIndicator: {
-    position: 'absolute',
-    top: 108,
-    left: 0,
-    right: 0,
     paddingVertical: 6,
     alignItems: 'center',
     zIndex: 100,
@@ -1303,9 +1352,10 @@ const styles = StyleSheet.create({
   },
   powerBar: {
     position: 'absolute',
-    top: 145,
-    left: 16,
-    right: 16,
+    top: 8,
+    alignSelf: 'center',
+    width: '92%',
+    maxWidth: 480,
     zIndex: 100,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1337,11 +1387,12 @@ const styles = StyleSheet.create({
     minWidth: 40,
   },
   powerUps: {
-    position: 'absolute',
-    bottom: 50,
-    right: 16,
-    gap: 8,
-    zIndex: 100,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    minHeight: 44,
+    marginTop: 8,
+    marginBottom: 24,
   },
   powerUpBtn: {
     flexDirection: 'row',
@@ -1375,6 +1426,7 @@ const styles = StyleSheet.create({
     padding: 28,
     alignItems: 'center',
     width: '80%',
+    maxWidth: 360,
   },
   resultTitle: {
     fontSize: 22,
@@ -1411,6 +1463,7 @@ const styles = StyleSheet.create({
     padding: 28,
     alignItems: 'center',
     width: '80%',
+    maxWidth: 360,
   },
   gameOverTitle: {
     fontSize: 30,
@@ -1451,6 +1504,7 @@ const styles = StyleSheet.create({
     padding: 28,
     alignItems: 'center',
     width: '70%',
+    maxWidth: 320,
   },
   pauseTitle: {
     fontSize: 26,
