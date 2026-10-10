@@ -532,6 +532,9 @@ export default function GameScreen() {
       onPanResponderTerminate: () => {
         setIsAiming(false);
         setPower(0);
+        if (isPlayerTurnRef.current) {
+          setMessage('Your turn! Drag from your pen to flick');
+        }
       },
     })
   ).current;
@@ -1213,6 +1216,8 @@ export default function GameScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    // A mouse drag on web would otherwise select text, which cancels the flick
+    userSelect: 'none',
   },
   background: {
     ...StyleSheet.absoluteFillObject,
