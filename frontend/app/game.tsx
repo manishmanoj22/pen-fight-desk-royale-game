@@ -161,8 +161,8 @@ export default function GameScreen() {
     };
   }, []);
 
-  // On wide screens the HUD and power-ups move to columns beside the desk so
-  // the desk can use the full height
+  // On wide screens the HUD and power-ups share one slim top bar so the desk
+  // can use nearly the full height
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const sideLayout = windowWidth > windowHeight * 1.3;
   const insets = useSafeAreaInsets();
@@ -653,50 +653,108 @@ export default function GameScreen() {
     dy: aimDirection.dy / aimLength,
   } : { dx: 0, dy: 0 };
 
+  const showPowerUps = isPlayerTurn && !isAnimating && !showResult;
+  const powerUpButtons = (
+    <>
+      <TouchableOpacity
+        style={[styles.powerUpBtn, (!hasRefillPower || refillActive) && styles.powerUpDisabled]}
+        onPress={handleRefillPower}
+        disabled={!hasRefillPower || refillActive}
+      >
+        <Ionicons name="flash" size={20} color={hasRefillPower && !refillActive ? '#F59E0B' : '#666'} />
+        <Text style={[styles.powerUpText, (!hasRefillPower || refillActive) && styles.powerUpTextDisabled]}>
+          {refillActive ? 'Active!' : 'Refill'}
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.powerUpBtn} onPress={toggleCap}>
+        <Ionicons name={capOn ? 'lock-closed' : 'lock-open'} size={20} color="#3B82F6" />
+        <Text style={styles.powerUpText}>{capOn ? 'Cap On' : 'Cap Off'}</Text>
+      </TouchableOpacity>
+    </>
+  );
+
   const powerColor = power > 0.7 ? '#EF4444' : power > 0.4 ? '#F59E0B' : '#22C55E';
 
   return (
-    <View style={[styles.container, sideLayout && styles.containerSide]} {...panResponder.panHandlers}>
+    <View style={styles.container} {...panResponder.panHandlers}>
       {/* Background */}
       <LinearGradient
         colors={['#2D1B0E', '#3D2817', '#4A3520']}
         style={styles.background}
       />
 
-      {/* HUD - a top bar, or a left column on wide screens */}
-      <View style={sideLayout ? [styles.sidePanel, { paddingLeft: 12 + insets.left }] : undefined}>
-        <View style={sideLayout ? styles.hudSide : styles.hud}>
+      {sideLayout ? (
+        /* Landscape: one slim bar across the top, like mobile billiards games */
+        <View style={[styles.topBar, { paddingLeft: 12 + insets.left, paddingRight: 12 + insets.right, paddingTop: 8 + insets.top }]}>
           <TouchableOpacity style={styles.pauseBtn} onPress={() => setIsPaused(true)}>
             <Ionicons name="pause" size={24} color="#FFF" />
           </TouchableOpacity>
 
-          <View style={[styles.scoreContainer, sideLayout && styles.scoreContainerSide]}>
-            <View style={styles.scoreBox}>
+          <View style={styles.compactScores}>
+            <View style={styles.compactPlayer}>
               <View style={[styles.penIndicator, { backgroundColor: playerPen.color }]} />
               <Text style={styles.scoreName}>YOU</Text>
-              <Text style={styles.scoreValue}>{playerScore}</Text>
             </View>
-          
+            <Text style={styles.compactScoreValue}>{playerScore}</Text>
             <View style={styles.vsBox}>
               <Text style={styles.vsText}>VS</Text>
               <Text style={styles.roundText}>First to {roundsToWin}</Text>
             </View>
-          
-            <View style={styles.scoreBox}>
+            <Text style={styles.compactScoreValue}>{aiScore}</Text>
+            <View style={styles.compactPlayer}>
               <View style={[styles.penIndicator, { backgroundColor: aiPen.color }]} />
               <Text style={styles.scoreName}>AI</Text>
-              <Text style={styles.scoreValue}>{aiScore}</Text>
             </View>
           </View>
-        </View>
 
-        {/* Turn indicator & Message */}
-        <View style={[styles.turnIndicator, sideLayout && styles.turnIndicatorSide, { backgroundColor: isPlayerTurn ? '#22C55E' : '#EF4444' }]}>
-          <Text style={styles.turnText}>
-            {message || (isPlayerTurn ? 'Your Turn' : 'AI Turn')}
-          </Text>
+          <View style={[styles.turnPill, { backgroundColor: isPlayerTurn ? '#22C55E' : '#EF4444' }]}>
+            <Text style={styles.turnText} numberOfLines={2}>
+              {message || (isPlayerTurn ? 'Your Turn' : 'AI Turn')}
+            </Text>
+          </View>
+
+          {/* Hidden rather than removed between turns so the bar doesn't shift */}
+          <View style={[styles.topBarPowerUps, !showPowerUps && styles.invisible]} pointerEvents={showPowerUps ? 'auto' : 'none'}>
+            {powerUpButtons}
+          </View>
         </View>
-      </View>
+      ) : (
+        <>
+          {/* HUD */}
+          <View style={styles.hud}>
+            <TouchableOpacity style={styles.pauseBtn} onPress={() => setIsPaused(true)}>
+              <Ionicons name="pause" size={24} color="#FFF" />
+            </TouchableOpacity>
+
+            <View style={styles.scoreContainer}>
+              <View style={styles.scoreBox}>
+                <View style={[styles.penIndicator, { backgroundColor: playerPen.color }]} />
+                <Text style={styles.scoreName}>YOU</Text>
+                <Text style={styles.scoreValue}>{playerScore}</Text>
+              </View>
+
+              <View style={styles.vsBox}>
+                <Text style={styles.vsText}>VS</Text>
+                <Text style={styles.roundText}>First to {roundsToWin}</Text>
+              </View>
+
+              <View style={styles.scoreBox}>
+                <View style={[styles.penIndicator, { backgroundColor: aiPen.color }]} />
+                <Text style={styles.scoreName}>AI</Text>
+                <Text style={styles.scoreValue}>{aiScore}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Turn indicator & Message */}
+          <View style={[styles.turnIndicator, { backgroundColor: isPlayerTurn ? '#22C55E' : '#EF4444' }]}>
+            <Text style={styles.turnText}>
+              {message || (isPlayerTurn ? 'Your Turn' : 'AI Turn')}
+            </Text>
+          </View>
+        </>
+      )}
 
       {/* Board - fills the space between HUD and power-ups; the world is scaled to fit */}
       <View style={styles.board} onLayout={handleBoardLayout}>
@@ -1221,27 +1279,11 @@ export default function GameScreen() {
       </View>
 
       {/* Power-ups - the row always keeps its space so the board doesn't jump between turns */}
-      <View style={sideLayout ? [styles.powerUpsSide, { paddingRight: 12 + insets.right }] : styles.powerUps}>
-        {isPlayerTurn && !isAnimating && !showResult && (
-          <>
-            <TouchableOpacity
-              style={[styles.powerUpBtn, (!hasRefillPower || refillActive) && styles.powerUpDisabled]}
-              onPress={handleRefillPower}
-              disabled={!hasRefillPower || refillActive}
-            >
-              <Ionicons name="flash" size={20} color={hasRefillPower && !refillActive ? '#F59E0B' : '#666'} />
-              <Text style={[styles.powerUpText, (!hasRefillPower || refillActive) && styles.powerUpTextDisabled]}>
-                {refillActive ? 'Active!' : 'Refill'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.powerUpBtn} onPress={toggleCap}>
-              <Ionicons name={capOn ? 'lock-closed' : 'lock-open'} size={20} color="#3B82F6" />
-              <Text style={styles.powerUpText}>{capOn ? 'Cap On' : 'Cap Off'}</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
+      {!sideLayout && (
+        <View style={styles.powerUps}>
+          {showPowerUps && powerUpButtons}
+        </View>
+      )}
 
       {/* Round Result Modal */}
       <Modal visible={showResult && gameStatus === 'playing'} transparent animationType="fade">
@@ -1314,32 +1356,39 @@ const styles = StyleSheet.create({
   background: {
     ...StyleSheet.absoluteFillObject,
   },
-  containerSide: {
+  topBar: {
     flexDirection: 'row',
-  },
-  sidePanel: {
-    width: 150,
-    paddingRight: 12,
-    paddingVertical: 16,
+    alignItems: 'center',
+    gap: 16,
+    paddingBottom: 8,
     backgroundColor: 'rgba(0,0,0,0.75)',
   },
-  hudSide: {
+  compactScores: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  compactPlayer: {
+    alignItems: 'center',
+  },
+  compactScoreValue: {
+    color: '#FFF',
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  turnPill: {
     flex: 1,
-  },
-  scoreContainerSide: {
-    flexDirection: 'column',
-    gap: 6,
-  },
-  turnIndicatorSide: {
     borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    alignItems: 'center',
   },
-  powerUpsSide: {
-    width: 130,
-    paddingLeft: 12,
-    justifyContent: 'center',
-    gap: 12,
+  topBarPowerUps: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  invisible: {
+    opacity: 0,
   },
   board: {
     flex: 1,
