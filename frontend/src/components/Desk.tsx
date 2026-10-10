@@ -12,7 +12,7 @@ interface DeskProps {
 
 export interface Obstacle {
   id: string;
-  type: 'geometryBox' | 'notebook' | 'eraser' | 'sharpener';
+  type: 'calculator' | 'notebook' | 'ruler' | 'eraser';
   x: number;
   y: number;
   width: number;

@@ -110,9 +110,9 @@ export class GamePhysics {
       penLength,
       penWidth,
       {
-        friction: playerPen.friction * 0.3, // More surface friction
-        frictionAir: 0.06, // Much more air friction to reduce gliding
-        frictionStatic: 0.8, // High static friction
+        friction: playerPen.friction * 0.2, // Collision friction
+        frictionAir: playerPen.friction * 0.06, // Realistic desktop sliding friction
+        frictionStatic: playerPen.friction * 0.4, // Grip before moving
         restitution: 0.5, // Less bouncy
         mass: playerPen.mass * capEffect,
         label: 'pen-player',
@@ -129,10 +129,10 @@ export class GamePhysics {
       penLength,
       penWidth,
       {
-        friction: aiPen.friction * 0.3, // More surface friction
-        frictionAir: 0.06, // Much more air friction to reduce gliding
-        frictionStatic: 0.8, // High static friction
-        restitution: 0.5, // Less bouncy
+        friction: aiPen.friction * 0.2,
+        frictionAir: aiPen.friction * 0.06, 
+        frictionStatic: aiPen.friction * 0.4,
+        restitution: 0.5, // Good bounce
         mass: aiPen.mass,
         label: 'pen-ai',
         ...penCollisionSettings,
@@ -201,31 +201,38 @@ export class GamePhysics {
     const { body, pen } = penData;
     const penCenter = body.position;
     
-    // Calculate torque based on where the hit point is relative to center
+    // Calculate hit offset relative to center of mass
     const hitOffset = Vector.sub(hitPoint, penCenter);
     const hitDistance = Vector.magnitude(hitOffset);
-    const maxDistance = 35; // Half pen length
     
-    // The further from center, the more spin (clamped)
-    const normalizedHitDistance = Math.min(hitDistance / maxDistance, 1);
-    const spinFactor = normalizedHitDistance * pen.rotationSpeed;
+    // Calculate raw cross-product torque (r x F)
+    const rawTorque = hitOffset.x * force.y - hitOffset.y * force.x;
     
-    // Calculate perpendicular direction for spin
-    const forceMag = Vector.magnitude(force);
-    if (forceMag < 0.1) return; // Too weak, ignore
-    
-    const forceDirection = Vector.normalise(force);
-    
-    // Determine spin direction based on which side of center was hit
-    const crossProduct = hitOffset.x * forceDirection.y - hitOffset.y * forceDirection.x;
-    const spinDirection = crossProduct > 0 ? 1 : -1;
-    
-    // Apply angular velocity (spin) - stronger effect
-    const angularVelocity = spinFactor * spinDirection * 0.15 * powerMultiplier;
+    // Map torque directly to angular velocity.
+    // Max typical torque is ~35 (half pen length) * ~20 (max force) = ~700.
+    const torqueMultiplier = 0.0003;
+    const angularVelocity = rawTorque * torqueMultiplier * pen.rotationSpeed * powerMultiplier;
     Body.setAngularVelocity(body, angularVelocity);
     
-    // Apply linear velocity - limit max speed to prevent tunneling
-    const velocityScale = 0.8 * powerMultiplier;
+    // Calculate how 'glancing' the blow is. 
+    // If the force is applied perpendicular to the edge of the pen, it spins away from the finger.
+    // This bleeds the linear impulse. If it is parallel, 100% of the force becomes linear movement.
+    const forceMag = Vector.magnitude(force);
+    let perpendicularity = 0;
+    
+    if (hitDistance > 1 && forceMag > 0.1) {
+       perpendicularity = Math.abs(rawTorque) / (hitDistance * forceMag);
+    }
+    
+    // The deeper towards the edge, the more the glancing blow bleeds linear momentum
+    const edgeFactor = Math.min(hitDistance / 35, 1); // 0 at center, 1 at typical edge
+    
+    // Keep between 40% (max spin attack) and 100% (perfect parallel slider)
+    const glancingReduction = 1 - (perpendicularity * edgeFactor * 0.6); 
+    
+    // Apply linear velocity (Impulse / Mass = Velocity)
+    // Heavy pens launch significantly slower, lighter pens act like rockets
+    const velocityScale = (0.45 / pen.mass) * powerMultiplier * glancingReduction;
     const maxSpeed = 15; // Maximum speed to prevent tunneling
     let velocity = {
       x: force.x * velocityScale,
@@ -244,7 +251,13 @@ export class GamePhysics {
     
     Body.setVelocity(body, velocity);
     
-    console.log('Flick applied:', { velocity, angularVelocity, hitDistance, spinFactor });
+    console.log('Flick applied:', { 
+      velocity, 
+      angularVelocity, 
+      hitDistance, 
+      rawTorque, 
+      glancingReduction 
+    });
   }
   
   // Advance the simulation by real elapsed time using fixed-size steps, so a

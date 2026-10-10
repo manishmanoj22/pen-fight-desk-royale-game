@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ImageBackground,
   Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,11 +17,18 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export default function HomeScreen() {
   const router = useRouter();
+  // Short landscape screens (phones held sideways) put the title beside the menu
+  const { width, height } = useWindowDimensions();
+  const landscape = width > height && height < 600;
   const resetGame = useGameStore((state) => state.resetGame);
   const setGameStatus = useGameStore((state) => state.setGameStatus);
+  const setGameMode = useGameStore((state) => state.setGameMode);
+  const setAiDifficulty = useGameStore((state) => state.setAiDifficulty);
 
-  const handlePlay = () => {
+  const startSetup = (mode: 'vs-ai' | 'local-multiplayer', difficulty: 'normal' | 'hard') => {
     resetGame();
+    setGameMode(mode);
+    setAiDifficulty(difficulty);
     setGameStatus('selecting');
     router.push('/select-pen');
   };
@@ -29,7 +37,7 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <LinearGradient
         colors={['#1a1a2e', '#16213e', '#0f3460']}
-        style={styles.gradient}
+        style={[styles.gradient, landscape && styles.gradientLandscape]}
       >
         {/* Decorative elements */}
         <View style={styles.decorativeCircle1} />
@@ -44,7 +52,7 @@ export default function HomeScreen() {
             </View>
           </View>
           
-          <Text style={styles.title}>PEN STRIKE</Text>
+          <Text style={styles.title}>PEN FIGHT</Text>
           <Text style={styles.subtitle}>DESK ROYALE</Text>
           
           <View style={styles.taglineContainer}>
@@ -53,20 +61,52 @@ export default function HomeScreen() {
         </View>
 
         {/* Menu Buttons */}
-        <View style={styles.menuContainer}>
+        <View style={[styles.menuContainer, landscape && styles.menuContainerLandscape]}>
           <TouchableOpacity
             style={styles.playButton}
-            onPress={handlePlay}
+            onPress={() => startSetup('vs-ai', 'normal')}
             activeOpacity={0.8}
           >
             <LinearGradient
-              colors={['#e94560', '#c23a51']}
+              colors={['#EF4444', '#DC2626']}
               style={styles.playButtonGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
-              <Ionicons name="play" size={28} color="#FFFFFF" />
-              <Text style={styles.playButtonText}>PLAY</Text>
+              <Ionicons name="person" size={22} color="#FFFFFF" />
+              <Text style={styles.playButtonText}>VS AI</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.playButton}
+            onPress={() => startSetup('local-multiplayer', 'normal')}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={['#F59E0B', '#D97706']}
+              style={styles.playButtonGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <Ionicons name="people" size={22} color="#FFFFFF" />
+              <Text style={styles.playButtonText}>PASS & PLAY</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.playButton}
+            onPress={() => router.push('/online-lobby')}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={['#22C55E', '#16A34A']}
+              style={styles.playButtonGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <Ionicons name="globe-outline" size={22} color="#FFFFFF" />
+              <Text style={styles.playButtonText}>ONLINE MATCH</Text>
             </LinearGradient>
           </TouchableOpacity>
 
@@ -90,14 +130,14 @@ export default function HomeScreen() {
         </View>
 
         {/* Footer */}
-        <View style={styles.footer}>
+        {!landscape && <View style={styles.footer}>
           <Text style={styles.footerText}>A nostalgic 90s classroom experience</Text>
           <View style={styles.footerIcons}>
             <Ionicons name="school-outline" size={16} color="#888" />
             <Text style={styles.footerEmoji}> ✏️ </Text>
             <Ionicons name="book-outline" size={16} color="#888" />
           </View>
-        </View>
+        </View>}
       </LinearGradient>
     </View>
   );
@@ -113,6 +153,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: 80,
     paddingBottom: 40,
+  },
+  gradientLandscape: {
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    paddingTop: 16,
+    paddingBottom: 16,
   },
   decorativeCircle1: {
     position: 'absolute',
@@ -195,6 +241,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
   },
+  menuContainerLandscape: {
+    width: '45%',
+    gap: 10,
+  },
   playButton: {
     width: '100%',
     borderRadius: 30,
@@ -213,10 +263,10 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   playButtonText: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#FFFFFF',
-    letterSpacing: 3,
+    letterSpacing: 2,
   },
   menuButton: {
     width: '100%',
