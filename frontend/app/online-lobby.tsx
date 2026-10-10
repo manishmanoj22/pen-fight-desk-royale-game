@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { socketService } from '../src/services/OnlineService';
+import { socketService, SERVER_URL } from '../src/services/OnlineService';
 import { useGameStore, PEN_CATALOG } from '../src/store/gameStore';
 import { generateObstacles } from '../src/utils/deskGenerator';
 
@@ -38,6 +38,14 @@ export default function OnlineLobby() {
       setStatus('waiting');
     });
 
+    const handleConnectError = () => {
+      setErrorMsg(`Can't reach the game server at ${SERVER_URL}. Is it running?`);
+      setStatus('idle');
+    };
+    const handleConnect = () => setErrorMsg('');
+    socket.on('connect_error', handleConnectError);
+    socket.on('connect', handleConnect);
+
     socket.on('error', (data: { message: string }) => {
       setErrorMsg(data.message);
       setStatus('idle');
@@ -46,6 +54,11 @@ export default function OnlineLobby() {
     socket.on('game_start', (data) => {
       console.log('Game starting! Setting up synced environment...');
       
+      // Start a fresh match: clear any previous scores, and mark the game as
+      // playing (the other modes do this on the pen-select screen, which online skips)
+      useGameStore.getState().resetGame();
+      useGameStore.getState().setGameStatus('playing');
+
       // Update global app state to online mode
       setGameMode('online-multiplayer' as any); 
       
@@ -61,6 +74,8 @@ export default function OnlineLobby() {
     // Cleanup listeners when component unmounts
     return () => {
       socket.off('room_created');
+      socket.off('connect_error', handleConnectError);
+      socket.off('connect', handleConnect);
       socket.off('error');
       socket.off('game_start');
     };

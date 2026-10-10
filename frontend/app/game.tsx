@@ -18,7 +18,7 @@ import Svg, { Line, Circle, Rect, Text as SvgText, G, Path, Defs, LinearGradient
 import { useGameStore, PenStats } from '../src/store/gameStore';
 import { GamePhysics } from '../src/engine/GamePhysics';
 import { GameAI } from '../src/engine/GameAI';
-import { socketService } from '../src/services/OnlineService';
+import { socketService, DeskState } from '../src/services/OnlineService';
 import { Obstacle } from '../src/components/Desk';
 import { generateObstacles, DESK_WIDTH, DESK_HEIGHT, DESK_X, DESK_Y } from '../src/utils/deskGenerator';
 
@@ -74,6 +74,11 @@ export default function GameScreen() {
   const insets = useSafeAreaInsets();
 
   // How the world is scaled and placed on screen; updated whenever the board resizes
+  // The online guest controls the pen at the far (right) end of the desk, so
+  // their view is turned around to put their own pen nearest them
+  const isOnline = gameMode === 'online-multiplayer';
+  const flipped = isOnline && !socketService.isPlayer1;
+
   const [board, setBoard] = useState({ scale: 1, offsetX: 0, offsetY: 0, rotated: false });
   const boardRef = useRef(board);
 
@@ -102,7 +107,9 @@ export default function GameScreen() {
     const vx = (pageX - offsetX) / scale;
     const vy = (pageY - offsetY) / scale;
     // Upright view: world x runs bottom-to-top, world y runs left-to-right
-    return rotated ? { x: WORLD_WIDTH - vy, y: vx } : { x: vx, y: vy };
+    // (the reverse of both for a flipped view)
+    if (rotated) return flipped ? { x: vy, y: WORLD_HEIGHT - vx } : { x: WORLD_WIDTH - vy, y: vx };
+    return flipped ? { x: WORLD_WIDTH - vx, y: WORLD_HEIGHT - vy } : { x: vx, y: vy };
   };
 
   // World position of a touch event; web release events can lack pageX/pageY,
@@ -142,6 +149,7 @@ export default function GameScreen() {
   const [message, setMessage] = useState('');
   const [roundStarter, setRoundStarter] = useState<'player' | 'ai'>('player');
   const [turnTimeLeft, setTurnTimeLeft] = useState(6); // 6-second shot clock
+  const [opponentLeft, setOpponentLeft] = useState(false);
 
   // Refs
   const physicsRef = useRef<GamePhysics | null>(null);
@@ -152,6 +160,7 @@ export default function GameScreen() {
   const pensFellRef = useRef<Set<'player' | 'ai'>>(new Set());
   const penOffGraceRef = useRef<{ firstFall: 'player' | 'ai'; framesLeft: number } | null>(null);
   const turnTimerRef = useRef<ReturnType<typeof setInterval> | null>(null); // Shot clock interval
+  const lastShooterRef = useRef<'me' | 'opponent' | null>(null); // Online: whose shot is playing out
 
   // Touch tracking refs (for PanResponder closure)
   const touchStartRef = useRef({ x: 0, y: 0 });
@@ -199,7 +208,8 @@ export default function GameScreen() {
 
   // Game loop
   const gameLoop = useCallback((timestamp: number) => {
-    if (!physicsRef.current || isPaused) {
+    // An online match keeps running while the pause menu is open, so both devices stay in step
+    if (!physicsRef.current || (isPaused && gameMode !== 'online-multiplayer')) {
       lastTimeRef.current = timestamp; // Don't count paused time as elapsed
       gameLoopRef.current = requestAnimationFrame(gameLoop);
       return;
@@ -243,6 +253,18 @@ export default function GameScreen() {
         // Nobody fell — normal end of move, pass the turn
         penFellRef.current = false; // reset so next move can track
         setIsAnimating(false);
+        // Online: the shooter's result is authoritative. Bring both pens to a
+        // complete stop (settled pens can still creep slightly) and send exactly
+        // where they are, so both devices end the shot identical
+        if (gameMode === 'online-multiplayer' && lastShooterRef.current === 'me') {
+          const player = physicsRef.current.getPenPosition(true);
+          const ai = physicsRef.current.getPenPosition(false);
+          if (player && ai) {
+            physicsRef.current.setPenState(true, player);
+            physicsRef.current.setPenState(false, ai);
+            socketService.sendDeskState({ player, ai });
+          }
+        }
         if (!showResult) toggleTurn();
       }
     }
@@ -338,6 +360,7 @@ export default function GameScreen() {
       const targetPrimary = !socketService.isPlayer1;
       
       setMessage('Opponent fired!');
+      lastShooterRef.current = 'opponent';
       physicsRef.current.flickPen(
         targetPrimary,
         { x: hitX, y: hitY },
@@ -351,12 +374,33 @@ export default function GameScreen() {
       clearTurnTimer();
     };
 
+    // Snap to where the opponent's shot actually settled on their device
+    const handleOpponentDeskState = (state: DeskState) => {
+      if (!physicsRef.current) return;
+      physicsRef.current.setPenState(true, state.player);
+      physicsRef.current.setPenState(false, state.ai);
+      setPlayerPos(state.player);
+      setAiPos(state.ai);
+    };
+
     socketService.onOpponentFlick(handleOpponentFlick);
+    socketService.onOpponentDeskState(handleOpponentDeskState);
+    socketService.onOpponentDisconnected(() => setOpponentLeft(true));
 
     return () => {
       socketService.offOpponentFlick();
+      socketService.offOpponentDeskState();
+      socketService.offOpponentDisconnected();
     };
   }, [gameMode]);
+
+  // Online rounds advance automatically on both devices, so neither player can
+  // shoot before the other's desk has been reset
+  useEffect(() => {
+    if (!isOnline || !showResult || gameStatus !== 'playing') return;
+    const timeout = setTimeout(handleNextRound, 2500);
+    return () => clearTimeout(timeout);
+  }, [showResult, gameStatus]);
 
   const executeAITurn = () => {
     if (!physicsRef.current) return;
@@ -657,6 +701,7 @@ export default function GameScreen() {
         // **ONLINE SYNC**: Sync the shot to the server if in online mode
         if (gameMode === 'online-multiplayer') {
           socketService.sendFlick({ forceX, forceY, hitX, hitY, powerMultiplier });
+          lastShooterRef.current = 'me';
         }
 
         // Execute flick - hitPoint determines spin
@@ -709,6 +754,10 @@ export default function GameScreen() {
   };
 
   const handleQuit = () => {
+    if (isOnline) {
+      socketService.disconnect();
+      useGameStore.getState().setOnlineObstacles(null); // Next local game gets a fresh desk
+    }
     resetGame();
     router.replace('/');
   };
@@ -729,12 +778,37 @@ export default function GameScreen() {
 
   const activeHasRefill = isPlayerTurn ? p1HasRefill : p2HasRefill;
 
+  // Maps world coordinates onto the view (see toWorld for the inverse)
+  const deskTransform = board.rotated
+    ? (flipped ? `matrix(0 1 -1 0 ${WORLD_HEIGHT} 0)` : `matrix(0 -1 1 0 0 ${WORLD_WIDTH})`)
+    : (flipped ? `matrix(-1 0 0 -1 ${WORLD_WIDTH} ${WORLD_HEIGHT})` : undefined);
+
+  // Which side this device plays: 'player' is player 1's pen, 'ai' player 2's
+  const mySide: 'player' | 'ai' | null =
+    gameMode === 'local-multiplayer' ? null : (isOnline && !socketService.isPlayer1 ? 'ai' : 'player');
+  const opponentName = isOnline ? 'Opponent' : 'AI';
+  const roundTitle = roundWinner === null ? '🤝 Draw!'
+    : mySide === null ? `🎉 Player ${roundWinner === 'player' ? 1 : 2} Scored!`
+    : roundWinner === mySide ? '🎉 You Scored!' : `😔 ${opponentName} Scored!`;
+  const finalWinner = useGameStore.getState().winner;
+  const gameOverTitle = mySide === null ? `🏆 PLAYER ${finalWinner === 'player' ? 1 : 2} WINS!`
+    : finalWinner === mySide ? '🏆 VICTORY!' : '💔 DEFEAT';
+
   const p1Label = gameMode === 'local-multiplayer' ? 'PLAYER 1' : (gameMode === 'online-multiplayer' ? (socketService.isPlayer1 ? 'YOU' : 'OPPONENT') : 'YOU');
   const p2Label = gameMode === 'local-multiplayer' ? 'PLAYER 2' : (gameMode === 'online-multiplayer' ? (socketService.isPlayer1 ? 'OPPONENT' : 'YOU') : 'AI');
+  const sides = [
+    { label: p1Label, score: playerScore, color: playerPen.color },
+    { label: p2Label, score: aiScore, color: aiPen.color },
+  ];
+  // A flipped view shows player 2's pen on the left, so the scoreboard follows it
+  const [hudLeft, hudRight] = flipped ? [sides[1], sides[0]] : sides;
   const turnLabel = message || (isPlayerTurn ? (gameMode === 'local-multiplayer' ? 'Player 1 Turn' : 'Your Turn') : (gameMode === 'local-multiplayer' ? 'Player 2 Turn' : 'AI Turn'));
 
-  // Shot clock — only shown during active player turns
-  const shotClock = !isAnimating && !showResult && (
+  // Green when the player at this device can shoot (online), or for player 1's turn
+  const turnColor = (isOnline ? isPlayerTurn === socketService.isPlayer1 : isPlayerTurn) ? '#22C55E' : '#EF4444';
+
+  // Shot clock — only shown during active player turns (online play has none)
+  const shotClock = !isOnline && !isAnimating && !showResult && (
     <View style={[styles.shotClock, {
       backgroundColor: turnTimeLeft <= 1 ? '#EF4444' : turnTimeLeft <= 2 ? '#F97316' : '#22C55E'
     }]}>
@@ -774,22 +848,22 @@ export default function GameScreen() {
 
           <View style={styles.compactScores}>
             <View style={styles.compactPlayer}>
-              <View style={[styles.penIndicator, { backgroundColor: playerPen.color }]} />
-              <Text style={styles.scoreName}>{p1Label}</Text>
+              <View style={[styles.penIndicator, { backgroundColor: hudLeft.color }]} />
+              <Text style={styles.scoreName}>{hudLeft.label}</Text>
             </View>
-            <Text style={styles.compactScoreValue}>{playerScore}</Text>
+            <Text style={styles.compactScoreValue}>{hudLeft.score}</Text>
             <View style={styles.vsBox}>
               <Text style={styles.vsText}>VS</Text>
               <Text style={styles.roundText}>First to {roundsToWin}</Text>
             </View>
-            <Text style={styles.compactScoreValue}>{aiScore}</Text>
+            <Text style={styles.compactScoreValue}>{hudRight.score}</Text>
             <View style={styles.compactPlayer}>
-              <View style={[styles.penIndicator, { backgroundColor: aiPen.color }]} />
-              <Text style={styles.scoreName}>{p2Label}</Text>
+              <View style={[styles.penIndicator, { backgroundColor: hudRight.color }]} />
+              <Text style={styles.scoreName}>{hudRight.label}</Text>
             </View>
           </View>
 
-          <View style={[styles.turnPill, { backgroundColor: isPlayerTurn ? '#22C55E' : '#EF4444' }]}>
+          <View style={[styles.turnPill, { backgroundColor: turnColor }]}>
             <Text style={styles.turnText} numberOfLines={2}>{turnLabel}</Text>
             {shotClock}
           </View>
@@ -809,9 +883,9 @@ export default function GameScreen() {
 
             <View style={styles.scoreContainer}>
               <View style={styles.scoreBox}>
-                <View style={[styles.penIndicator, { backgroundColor: playerPen.color }]} />
-                <Text style={styles.scoreName}>{p1Label}</Text>
-                <Text style={styles.scoreValue}>{playerScore}</Text>
+                <View style={[styles.penIndicator, { backgroundColor: hudLeft.color }]} />
+                <Text style={styles.scoreName}>{hudLeft.label}</Text>
+                <Text style={styles.scoreValue}>{hudLeft.score}</Text>
               </View>
 
               <View style={styles.vsBox}>
@@ -820,15 +894,15 @@ export default function GameScreen() {
               </View>
 
               <View style={styles.scoreBox}>
-                <View style={[styles.penIndicator, { backgroundColor: aiPen.color }]} />
-                <Text style={styles.scoreName}>{p2Label}</Text>
-                <Text style={styles.scoreValue}>{aiScore}</Text>
+                <View style={[styles.penIndicator, { backgroundColor: hudRight.color }]} />
+                <Text style={styles.scoreName}>{hudRight.label}</Text>
+                <Text style={styles.scoreValue}>{hudRight.score}</Text>
               </View>
             </View>
           </View>
 
           {/* Turn indicator & Message */}
-          <View style={[styles.turnIndicator, { backgroundColor: isPlayerTurn ? '#22C55E' : '#EF4444' }]}>
+          <View style={[styles.turnIndicator, { backgroundColor: turnColor }]}>
             <Text style={styles.turnText}>{turnLabel}</Text>
             {shotClock}
           </View>
@@ -938,7 +1012,7 @@ export default function GameScreen() {
           </Defs>
 
           {/* Upright view: turn the desk so player 1's end (world left) is at the bottom */}
-          <G transform={board.rotated ? `matrix(0 -1 1 0 0 ${WORLD_WIDTH})` : undefined}>
+          <G transform={deskTransform}>
 
             {/* Desk shadow */}
             <Rect
@@ -1485,18 +1559,18 @@ export default function GameScreen() {
       <Modal visible={showResult && gameStatus === 'playing'} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.resultModal}>
-            <Text style={styles.resultTitle}>
-              {roundWinner === 'player' ? '🎉 You Scored!' :
-                roundWinner === 'ai' ? '😔 AI Scored!' :
-                  '🤝 Draw!'}
-            </Text>
+            <Text style={styles.resultTitle}>{roundTitle}</Text>
             <Text style={styles.resultScore}>{playerScore} - {aiScore}</Text>
             {roundWinner === null && (
               <Text style={styles.drawText}>Both pens fell off - no points</Text>
             )}
-            <TouchableOpacity style={styles.nextRoundBtn} onPress={handleNextRound}>
-              <Text style={styles.nextRoundText}>Next Round</Text>
-            </TouchableOpacity>
+            {isOnline ? (
+              <Text style={styles.drawText}>Next round starting…</Text>
+            ) : (
+              <TouchableOpacity style={styles.nextRoundBtn} onPress={handleNextRound}>
+                <Text style={styles.nextRoundText}>Next Round</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
@@ -1505,19 +1579,33 @@ export default function GameScreen() {
       <Modal visible={gameStatus === 'gameOver'} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.gameOverModal}>
-            <Text style={styles.gameOverTitle}>
-              {useGameStore.getState().winner === 'player' ? '🏆 VICTORY!' : '💔 DEFEAT'}
-            </Text>
+            <Text style={styles.gameOverTitle}>{gameOverTitle}</Text>
             <Text style={styles.gameOverScore}>Final: {playerScore} - {aiScore}</Text>
 
-            <TouchableOpacity style={styles.playAgainBtn} onPress={handlePlayAgain}>
-              <LinearGradient colors={['#22C55E', '#16A34A']} style={styles.playAgainGradient}>
-                <Text style={styles.playAgainText}>Play Again</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+            {/* A rematch online would need both players to agree, so online games end here */}
+            {!isOnline && (
+              <TouchableOpacity style={styles.playAgainBtn} onPress={handlePlayAgain}>
+                <LinearGradient colors={['#22C55E', '#16A34A']} style={styles.playAgainGradient}>
+                  <Text style={styles.playAgainText}>Play Again</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity style={styles.homeBtn} onPress={handleQuit}>
               <Text style={styles.homeBtnText}>Back to Menu</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Opponent Left Modal */}
+      <Modal visible={opponentLeft && gameStatus !== 'gameOver'} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.pauseModal}>
+            <Text style={styles.pauseTitle}>Opponent left</Text>
+            <Text style={styles.drawText}>Your opponent disconnected from the match.</Text>
+            <TouchableOpacity style={styles.quitBtn} onPress={handleQuit}>
+              <Text style={styles.quitText}>Back to Menu</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1527,7 +1615,7 @@ export default function GameScreen() {
       <Modal visible={isPaused} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.pauseModal}>
-            <Text style={styles.pauseTitle}>PAUSED</Text>
+            <Text style={styles.pauseTitle}>{isOnline ? 'MENU' : 'PAUSED'}</Text>
 
             <TouchableOpacity style={styles.resumeBtn} onPress={() => setIsPaused(false)}>
               <Text style={styles.resumeText}>Resume</Text>

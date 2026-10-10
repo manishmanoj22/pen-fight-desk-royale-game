@@ -1,14 +1,34 @@
 import { io, Socket } from 'socket.io-client';
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
-// Change this to your deployed URL when pushing to Railway
-// E.g., const SERVER_URL = 'https://pen-fight-desk-royale.up.railway.app';
+export type PenState = { x: number; y: number; angle: number };
+export type DeskState = { player: PenState; ai: PenState };
 
-// For local testing:
-// If using iOS Simulator: 'http://localhost:8000'
-// If using Android Emulator: 'http://10.0.2.2:8000'
-// If using a physical phone with Expo Go: Use your Mac's IP address like 'http://192.168.1.15:8000'
+// Where the game server is:
+// - Deployed: set EXPO_PUBLIC_SERVER_URL (e.g. in frontend/.env) to its URL,
+//   e.g. EXPO_PUBLIC_SERVER_URL=https://pen-fight-desk-royale.up.railway.app
+// - Local development: the server runs on the same computer as Expo, on port
+//   8000, so its address is worked out from where the app was loaded from
+//   (the browser's address, or the Expo dev server's address on a phone).
+const SERVER_PORT = 8000;
 
-const SERVER_URL = 'http://192.168.200.248:8000';
+const resolveServerUrl = (): string => {
+  const configured = process.env.EXPO_PUBLIC_SERVER_URL;
+  if (configured) return configured;
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:${SERVER_PORT}`;
+  }
+
+  // e.g. "192.168.1.15:8081" when running in Expo Go on a phone
+  const devHost = Constants.expoConfig?.hostUri?.split(':')[0];
+  if (devHost) return `http://${devHost}:${SERVER_PORT}`;
+
+  return `http://localhost:${SERVER_PORT}`;
+};
+
+export const SERVER_URL = resolveServerUrl();
 
 class OnlineService {
   private socket: Socket | null = null;
@@ -79,6 +99,30 @@ class OnlineService {
     if (this.socket) {
       this.socket.off('opponent_flicked');
     }
+  }
+
+  // After a shot settles, the shooter sends where both pens ended up so the
+  // two devices can't drift apart over a match
+  sendDeskState(state: DeskState) {
+    if (this.socket && this.roomCode) {
+      this.socket.emit('desk_state', { room_code: this.roomCode, ...state });
+    }
+  }
+
+  onOpponentDeskState(callback: (state: DeskState) => void) {
+    this.socket?.on('opponent_desk_state', callback);
+  }
+
+  offOpponentDeskState() {
+    this.socket?.off('opponent_desk_state');
+  }
+
+  onOpponentDisconnected(callback: () => void) {
+    this.socket?.on('opponent_disconnected', callback);
+  }
+
+  offOpponentDisconnected() {
+    this.socket?.off('opponent_disconnected');
   }
 }
 

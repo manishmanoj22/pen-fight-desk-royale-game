@@ -165,3 +165,18 @@ async def flick_event(sid, data):
     if room_code:
         # Relay the flick event to the opponent
         await sio.emit('opponent_flicked', data, room=room_code, skip_sid=sid)
+
+@sio.event
+async def desk_state(sid, data):
+    room_code = data.get('room_code')
+    if room_code:
+        # Relay where the pens settled after a shot so both devices stay in sync
+        await sio.emit('opponent_desk_state', data, room=room_code, skip_sid=sid)
+
+
+# Socket.IO lives on socket_app (which wraps the FastAPI app), so that is what
+# must be served: `python server.py`, or `uvicorn server:socket_app`.
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(socket_app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+

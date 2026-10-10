@@ -375,6 +375,17 @@ export class GamePhysics {
     }
   }
   
+  // Place a pen at rest at an exact position, e.g. to match the authoritative
+  // state sent by the other player in an online match
+  setPenState(isPlayer: boolean, state: { x: number; y: number; angle: number }) {
+    const penData = this.penBodies.get(isPlayer ? 'player' : 'ai');
+    if (!penData) return;
+    Body.setPosition(penData.body, { x: state.x, y: state.y });
+    Body.setAngle(penData.body, state.angle);
+    Body.setVelocity(penData.body, { x: 0, y: 0 });
+    Body.setAngularVelocity(penData.body, 0);
+  }
+
   destroy() {
     Events.off(this.engine, 'collisionStart', this.handleCollision.bind(this));
     World.clear(this.engine.world, false);
