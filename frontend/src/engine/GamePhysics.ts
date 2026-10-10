@@ -17,7 +17,11 @@ export interface GamePhysicsConfig {
   deskY: number;
 }
 
+const FIXED_STEP = 1000 / 180; // ms of simulated time per physics step
+const MAX_FRAME_TIME = 100; // Cap catch-up after a stall (e.g. a backgrounded tab)
+
 export class GamePhysics {
+  private accumulator = 0;
   private engine: Matter.Engine;
   private penBodies: Map<string, PenBody> = new Map();
   private obstacleBodies: Matter.Body[] = [];
@@ -243,13 +247,15 @@ export class GamePhysics {
     console.log('Flick applied:', { velocity, angularVelocity, hitDistance, spinFactor });
   }
   
+  // Advance the simulation by real elapsed time using fixed-size steps, so a
+  // flick plays out identically at 60Hz, 120Hz or on a device dropping frames.
+  // Small steps (3 per 60Hz frame) also keep collision detection accurate.
   update(deltaTime: number) {
-    // Use smaller sub-steps for better collision detection
-    const subSteps = 3;
-    const subDelta = deltaTime / subSteps;
-    
-    for (let i = 0; i < subSteps; i++) {
-      Engine.update(this.engine, subDelta);
+    this.accumulator += Math.min(deltaTime, MAX_FRAME_TIME);
+
+    while (this.accumulator >= FIXED_STEP) {
+      Engine.update(this.engine, FIXED_STEP);
+      this.accumulator -= FIXED_STEP;
     }
   }
   

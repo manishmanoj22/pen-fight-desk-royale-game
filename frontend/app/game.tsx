@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Dimensions,
   PanResponder,
   TouchableOpacity,
   Modal,
@@ -19,9 +18,11 @@ import { GamePhysics } from '../src/engine/GamePhysics';
 import { GameAI } from '../src/engine/GameAI';
 import { Obstacle } from '../src/components/Desk';
 
-// The game runs in a fixed-size world that is scaled to fit the screen, so
-// pens, obstacles and physics keep the same proportions on every device.
-// Wide screens get a landscape desk, tall screens a portrait one.
+// The game runs in a fixed world measured in its own units, not screen pixels
+// (like a pool table defined in metres). Every device simulates exactly the
+// same desk; the renderer only scales it to fit and leaves bars around it when
+// the screen's shape doesn't match. These are the dimensions the physics, AI
+// and obstacles were tuned on.
 interface DeskWorld {
   DESK_X: number;
   DESK_Y: number;
@@ -33,19 +34,16 @@ interface DeskWorld {
 
 const WORLD_PADDING = 16; // Room around the desk so falling pens stay visible
 
-const createDeskWorld = (): DeskWorld => {
-  const { width, height } = Dimensions.get('window');
-  const landscape = width > height;
-  const DESK_WIDTH = landscape ? 600 : 358;
-  const DESK_HEIGHT = landscape ? 380 : 464;
-  return {
-    DESK_X: WORLD_PADDING,
-    DESK_Y: WORLD_PADDING,
-    DESK_WIDTH,
-    DESK_HEIGHT,
-    WORLD_WIDTH: DESK_WIDTH + WORLD_PADDING * 2,
-    WORLD_HEIGHT: DESK_HEIGHT + WORLD_PADDING * 2,
-  };
+const DESK_WORLD_WIDTH = 358;
+const DESK_WORLD_HEIGHT = 464;
+
+const DESK_WORLD: DeskWorld = {
+  DESK_X: WORLD_PADDING,
+  DESK_Y: WORLD_PADDING,
+  DESK_WIDTH: DESK_WORLD_WIDTH,
+  DESK_HEIGHT: DESK_WORLD_HEIGHT,
+  WORLD_WIDTH: DESK_WORLD_WIDTH + WORLD_PADDING * 2,
+  WORLD_HEIGHT: DESK_WORLD_HEIGHT + WORLD_PADDING * 2,
 };
 
 // Game constants
@@ -150,7 +148,7 @@ export default function GameScreen() {
     resetGame,
   } = useGameStore();
 
-  const [world] = useState(createDeskWorld);
+  const world = DESK_WORLD;
   const { DESK_X, DESK_Y, DESK_WIDTH, DESK_HEIGHT, WORLD_WIDTH, WORLD_HEIGHT } = world;
 
   // How the world is scaled and placed on screen; updated whenever the board resizes
@@ -253,11 +251,13 @@ export default function GameScreen() {
   // Game loop
   const gameLoop = useCallback((timestamp: number) => {
     if (!physicsRef.current || isPaused) {
+      lastTimeRef.current = timestamp; // Don't count paused time as elapsed
       gameLoopRef.current = requestAnimationFrame(gameLoop);
       return;
     }
 
-    const deltaTime = Math.min(timestamp - lastTimeRef.current, 16.67);
+    // Real elapsed time; the physics advances it in fixed steps
+    const deltaTime = timestamp - lastTimeRef.current;
     lastTimeRef.current = timestamp;
 
     physicsRef.current.update(deltaTime);
