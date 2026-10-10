@@ -90,7 +90,7 @@ export interface GameState {
 
   // Game status
   selectingPlayer: 1 | 2;
-  gameMode: 'vs-ai' | 'local-multiplayer';
+  gameMode: 'vs-ai' | 'local-multiplayer' | 'online-multiplayer';
   aiDifficulty: 'normal' | 'hard';
   gameStatus: 'menu' | 'selecting' | 'playing' | 'paused' | 'gameOver';
   winner: 'player' | 'ai' | null;
@@ -109,6 +109,9 @@ export interface GameState {
   setGameStatus: (status: GameState['gameStatus']) => void;
   setWinner: (winner: 'player' | 'ai' | null) => void;
   resetGame: () => void;
+  
+  onlineObstacles: any[] | null;
+  setOnlineObstacles: (obstacles: any[] | null) => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -126,6 +129,7 @@ export const useGameStore = create<GameState>((set) => ({
   aiDifficulty: 'normal',
   gameStatus: 'menu',
   winner: null,
+  onlineObstacles: null,
 
   setPlayerPen: (pen) => set({ playerPen: pen }),
   setAiPen: (pen) => set({ aiPen: pen }),
@@ -139,6 +143,7 @@ export const useGameStore = create<GameState>((set) => ({
   setAiDifficulty: (difficulty) => set({ aiDifficulty: difficulty }),
   setGameStatus: (status) => set({ gameStatus: status }),
   setWinner: (winner) => set({ winner }),
+  setOnlineObstacles: (obstacles) => set({ onlineObstacles: obstacles }),
   resetGame: () => set({
     isPlayerTurn: true,
     playerScore: 0,

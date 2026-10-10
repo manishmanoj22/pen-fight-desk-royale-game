@@ -16,120 +16,19 @@ import Svg, { Line, Circle, Rect, Text as SvgText, G, Path, Defs, LinearGradient
 import { useGameStore, PenStats } from '../src/store/gameStore';
 import { GamePhysics } from '../src/engine/GamePhysics';
 import { GameAI } from '../src/engine/GameAI';
+import { socketService } from '../src/services/OnlineService';
 import { Obstacle } from '../src/components/Desk';
+import { generateObstacles, DESK_WIDTH, DESK_HEIGHT, DESK_X, DESK_Y } from '../src/utils/deskGenerator';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Game constants
-const DESK_MARGIN = 16;
-const DESK_WIDTH = SCREEN_WIDTH - DESK_MARGIN * 2;
-const DESK_HEIGHT = SCREEN_HEIGHT * 0.55;
-const DESK_X = DESK_MARGIN;
-const DESK_Y = 140;
 const MAX_POWER = 1;
 const POWER_SCALE = 150;
 const PEN_LENGTH = 70;
 const PEN_WIDTH = 14;
 
-// Random number helper
-const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
 
-// Generate randomized obstacles with center barrier
-const generateObstacles = (): Obstacle[] => {
-  const obstacles: Obstacle[] = [];
-
-  // ERASER - Fixed exactly in the center of the desk
-  obstacles.push({
-    id: 'eraser',
-    type: 'eraser',
-    x: DESK_X + DESK_WIDTH / 2 - 19,
-    y: DESK_Y + DESK_HEIGHT / 2 - 10,
-    width: 38,
-    height: 20,
-    rotation: randomInRange(-15, 15),
-  });
-
-  const midY = DESK_Y + DESK_HEIGHT / 2;
-
-  // Helper to check if a new obstacle is safe
-  const isSafe = (x: number, y: number, w: number, h: number, attempts: number) => {
-    // 1. Give player pens specific safe spawn clearings (they spawn at x: 80 and x: WIDTH-80 on the midY line)
-    const cx = x + w / 2;
-    const cy = y + h / 2;
-
-    // Check P1 (Left Spawn) Bubble
-    if (Math.abs(cx - (DESK_X + 80)) < w / 2 + 60 && Math.abs(cy - midY) < h / 2 + 60) return false;
-    // Check P2 (Right Spawn) Bubble
-    if (Math.abs(cx - (DESK_X + DESK_WIDTH - 80)) < w / 2 + 60 && Math.abs(cy - midY) < h / 2 + 60) return false;
-    // Check Center Eraser Bubble
-    if (Math.abs(cx - (DESK_X + DESK_WIDTH / 2)) < w / 2 + 30 && Math.abs(cy - midY) < h / 2 + 30) return false;
-
-    // 2. Progressive AABB overlap matrix to enforce global spatial spread
-    for (const obs of obstacles) {
-      // Expansive repulsion dynamically collapses:
-      // Attempts 0-50: Try to force objects at least 180px apart (massive spread)
-      // Attempts 51-100: Relax to 60px apart (reasonable spacing)
-      // Attempts 101-150: Desperation fallback (kissing borders) to guarantee fit
-      const repulseMargin = attempts < 50 ? 180 : (attempts < 100 ? 60 : 5);
-      if (
-        x < obs.x + obs.width + repulseMargin &&
-        x + w > obs.x - repulseMargin &&
-        y < obs.y + obs.height + repulseMargin &&
-        y + h > obs.y - repulseMargin
-      ) {
-        return false;
-      }
-    }
-
-    return true;
-  };
-
-  // Define the items to place
-  const itemsToPlace = [
-    { id: 'notebook', type: 'notebook' as const, width: 80, height: 100, rotRange: 15 },
-    { id: 'calculator', type: 'calculator' as const, width: 60, height: 80, rotRange: 10 },
-    { id: 'ruler-1', type: 'ruler' as const, width: 140, height: 20, rotRange: 20 },
-  ];
-
-  for (const item of itemsToPlace) {
-    let placed = false;
-    let attempts = 0;
-
-    while (!placed && attempts < 150) {
-      attempts++;
-      const x = DESK_X + randomInRange(20, DESK_WIDTH - item.width - 20);
-      const y = DESK_Y + randomInRange(20, DESK_HEIGHT - item.height - 20);
-
-      if (isSafe(x, y, item.width, item.height, attempts)) {
-        obstacles.push({
-          id: item.id,
-          type: item.type,
-          x,
-          y,
-          width: item.width,
-          height: item.height,
-          rotation: randomInRange(-item.rotRange, item.rotRange),
-        });
-        placed = true;
-      }
-    }
-
-    // Fallback if 150 attempts failed (rare, but keeps engine loop from hanging)
-    if (!placed) {
-      obstacles.push({
-        id: item.id,
-        type: item.type,
-        x: DESK_X + randomInRange(50, DESK_WIDTH - item.width - 50),
-        y: DESK_Y + randomInRange(50, DESK_HEIGHT - item.height - 50),
-        width: item.width,
-        height: item.height,
-        rotation: randomInRange(-item.rotRange, item.rotRange),
-      });
-    }
-  }
-
-  return obstacles;
-};
 
 interface PenPosition {
   x: number;
@@ -181,7 +80,11 @@ export default function GameScreen() {
   const [roundWinner, setRoundWinner] = useState<'player' | 'ai' | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
   const [refillActive, setRefillActive] = useState(false);
-  const [obstacles] = useState<Obstacle[]>(generateObstacles());
+  
+  // Use online server overrides if available, otherwise spin up local gen
+  const { onlineObstacles } = useGameStore();
+  const [obstacles] = useState<Obstacle[]>(onlineObstacles || generateObstacles());
+  
   const [message, setMessage] = useState('');
   const [roundStarter, setRoundStarter] = useState<'player' | 'ai'>('player');
   const [turnTimeLeft, setTurnTimeLeft] = useState(6); // 6-second shot clock
@@ -313,10 +216,26 @@ export default function GameScreen() {
     clearTurnTimer();
     setTurnTimeLeft(6);
 
-    if (!isPlayerTurn && !isAnimating && !showResult && physicsRef.current && !penFellRef.current) {
+    const canAct = gameMode === 'online-multiplayer' 
+      ? isPlayerTurn === socketService.isPlayer1 
+      : (gameMode === 'local-multiplayer' ? true : isPlayerTurn);
+
+    if (!canAct && !isAnimating && !showResult && physicsRef.current && !penFellRef.current) {
+      if (gameMode === 'online-multiplayer') {
+        setMessage("Opponent is aiming...");
+      } else {
+        setMessage('AI is thinking...');
+        const aiTurnTimeout = setTimeout(() => {
+          executeAITurn();
+        }, 1200);
+        return () => clearTimeout(aiTurnTimeout);
+      }
+    } else if (canAct && !isAnimating && !showResult && physicsRef.current && !penFellRef.current) {
+      let p1Msg = 'Your turn!';
       if (gameMode === 'local-multiplayer') {
-        setMessage("Player 2's turn! Drag from your pen to flick");
-        // Start shot clock for Player 2
+        p1Msg = isPlayerTurn ? "Player 1's turn! Drag from your pen to flick" : "Player 2's turn! Drag from your pen to flick";
+        
+        // Start shot clock for Local Multiplayer
         turnTimerRef.current = setInterval(() => {
           setTurnTimeLeft(prev => {
             if (prev <= 1) {
@@ -327,31 +246,61 @@ export default function GameScreen() {
             return prev - 1;
           });
         }, 1000);
+      } else if (gameMode === 'online-multiplayer') {
+        p1Msg = "Your turn! Flick to strike!";
+        // Online MP has NO shotclock timer locally to prevent network race conditions
       } else {
-        setMessage('AI is thinking...');
-        const aiTurnTimeout = setTimeout(() => {
-          executeAITurn();
-        }, 1200);
-        return () => clearTimeout(aiTurnTimeout);
+        // VS AI Shot clock
+        turnTimerRef.current = setInterval(() => {
+          setTurnTimeLeft(prev => {
+            if (prev <= 1) {
+              clearTurnTimer();
+              toggleTurn();
+              return 6;
+            }
+            return prev - 1;
+          });
+        }, 1000);
       }
-    } else if (isPlayerTurn && !isAnimating && !showResult) {
-      const p1Msg = gameMode === 'local-multiplayer' ? "Player 1's turn! Drag from your pen to flick" : 'Your turn!';
       setMessage(p1Msg);
-      // Start shot clock for Player 1
-      turnTimerRef.current = setInterval(() => {
-        setTurnTimeLeft(prev => {
-          if (prev <= 1) {
-            clearTurnTimer();
-            toggleTurn();
-            return 6;
-          }
-          return prev - 1;
-        });
-      }, 1000);
     }
 
     return () => clearTurnTimer();
   }, [isPlayerTurn, isAnimating, showResult, gameMode]);
+
+  // ── Online Networking Listeners ──────────────────────────────────────────
+  useEffect(() => {
+    if (gameMode !== 'online-multiplayer') return;
+
+    const handleOpponentFlick = (data: { forceX: number; forceY: number; hitX: number; hitY: number; powerMultiplier: number }) => {
+      if (!physicsRef.current) return;
+      
+      const { forceX, forceY, hitX, hitY, powerMultiplier } = data;
+      
+      // Opponent is always the one that is NOT us
+      // Therefore targetPrimary is the opposite of socketService.isPlayer1
+      const targetPrimary = !socketService.isPlayer1;
+      
+      setMessage('Opponent fired!');
+      physicsRef.current.flickPen(
+        targetPrimary,
+        { x: hitX, y: hitY },
+        { x: forceX, y: forceY },
+        powerMultiplier
+      );
+      
+      setIsAiming(false);
+      setPower(0);
+      setIsAnimating(true);
+      clearTurnTimer();
+    };
+
+    socketService.onOpponentFlick(handleOpponentFlick);
+
+    return () => {
+      socketService.offOpponentFlick();
+    };
+  }, [gameMode]);
 
   const executeAITurn = () => {
     if (!physicsRef.current) return;
@@ -390,11 +339,21 @@ export default function GameScreen() {
     if (isPlayer) {
       incrementAiScore();
       setRoundWinner('ai');
-      setMessage(gameMode === 'local-multiplayer' ? 'Player 1 pen fell off! Player 2 scores!' : 'Your pen fell off! AI scores!');
+      let msg = 'Your pen fell off! AI scores!';
+      if (gameMode === 'local-multiplayer') msg = 'Player 1 pen fell off! Player 2 scores!';
+      else if (gameMode === 'online-multiplayer') {
+        msg = socketService.isPlayer1 ? 'Your pen fell off! Opponent scores!' : "Opponent's pen fell off! You score!";
+      }
+      setMessage(msg);
     } else {
       incrementPlayerScore();
       setRoundWinner('player');
-      setMessage(gameMode === 'local-multiplayer' ? 'Player 2 pen fell off! Player 1 scores!' : 'AI pen knocked off! You score!');
+      let msg = 'AI pen knocked off! You score!';
+      if (gameMode === 'local-multiplayer') msg = 'Player 2 pen fell off! Player 1 scores!';
+      else if (gameMode === 'online-multiplayer') {
+        msg = socketService.isPlayer1 ? "Opponent's pen fell off! You score!" : 'Your pen fell off! Opponent scores!';
+      }
+      setMessage(msg);
     }
 
     setShowResult(true);
@@ -445,6 +404,9 @@ export default function GameScreen() {
 
     if (gameMode === 'local-multiplayer') {
       setMessage(nextStarter === 'player' ? 'New round! Player 1 starts' : 'New round! Player 2 starts');
+    } else if (gameMode === 'online-multiplayer') {
+      const isMyTurn = socketService.isPlayer1 ? (nextStarter === 'player') : (nextStarter === 'ai');
+      setMessage(isMyTurn ? 'New round! Your turn' : 'New round! Opponent starts');
     } else {
       setMessage(nextStarter === 'player' ? 'New round! Your turn' : 'New round! AI starts');
     }
@@ -510,34 +472,47 @@ export default function GameScreen() {
     };
   };
 
+  // Helper to determine touch permissions and targets
+  const getInteractionState = () => {
+    let canAct = false;
+    let targetPrimary = true;
+
+    if (gameMode === 'local-multiplayer') {
+      canAct = true;
+      targetPrimary = isPlayerTurnRef.current;
+    } else if (gameMode === 'online-multiplayer') {
+      canAct = (isPlayerTurnRef.current === socketService.isPlayer1);
+      targetPrimary = socketService.isPlayer1;
+    } else {
+      // vs-ai
+      canAct = isPlayerTurnRef.current;
+      targetPrimary = true;
+    }
+    
+    return { canAct, targetPrimary };
+  };
+
   // Pan responder for flicking
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: (evt) => {
-        // Use refs for most up-to-date state values
-        const isLocalMultiplayer = gameMode === 'local-multiplayer';
-        const canAct = isLocalMultiplayer || isPlayerTurnRef.current;
+        const { canAct, targetPrimary } = getInteractionState();
 
         if (!canAct || isAnimatingRef.current || showResultRef.current) {
           return false;
         }
 
         const touch = evt.nativeEvent;
-        // Target specific pen based on turn
-        const targetPrimary = isLocalMultiplayer ? isPlayerTurnRef.current : true;
-
         // Only start if touch is actually ON the correct pen
         return isTouchOnPen(touch.pageX, touch.pageY, targetPrimary);
       },
       onMoveShouldSetPanResponder: () => {
-        const isLocalMultiplayer = gameMode === 'local-multiplayer';
-        const canAct = isLocalMultiplayer || isPlayerTurnRef.current;
+        const { canAct } = getInteractionState();
         return canAct && !isAnimatingRef.current && !showResultRef.current;
       },
 
       onPanResponderGrant: (evt) => {
-        const isLocalMultiplayer = gameMode === 'local-multiplayer';
-        const canAct = isLocalMultiplayer || isPlayerTurnRef.current;
+        const { canAct, targetPrimary } = getInteractionState();
 
         // Double-check it's still allowed
         if (!canAct || isAnimatingRef.current) {
@@ -545,7 +520,6 @@ export default function GameScreen() {
         }
 
         const touch = evt.nativeEvent;
-        const targetPrimary = isLocalMultiplayer ? isPlayerTurnRef.current : true;
         const hit = getHitPointOnPen(touch.pageX, touch.pageY, targetPrimary);
 
         // Store in refs for closure access
@@ -626,8 +600,12 @@ export default function GameScreen() {
         const powerMultiplier = refillActive ? 1.5 : 1;
 
         // Target specific pen based on turn
-        const isLocalMultiplayer = gameMode === 'local-multiplayer';
-        const targetPrimary = isLocalMultiplayer ? isPlayerTurnRef.current : true;
+        const { targetPrimary } = getInteractionState();
+
+        // **ONLINE SYNC**: Sync the shot to the server if in online mode
+        if (gameMode === 'online-multiplayer') {
+          socketService.sendFlick({ forceX, forceY, hitX, hitY, powerMultiplier });
+        }
 
         // Execute flick - hitPoint determines spin
         physicsRef.current.flickPen(
@@ -715,7 +693,9 @@ export default function GameScreen() {
         <View style={styles.scoreContainer}>
           <View style={styles.scoreBox}>
             <View style={[styles.penIndicator, { backgroundColor: playerPen.color }]} />
-            <Text style={styles.scoreName}>{gameMode === 'local-multiplayer' ? 'PLAYER 1' : 'YOU'}</Text>
+            <Text style={styles.scoreName}>
+              {gameMode === 'local-multiplayer' ? 'PLAYER 1' : (gameMode === 'online-multiplayer' ? (socketService.isPlayer1 ? 'YOU' : 'OPPONENT') : 'YOU')}
+            </Text>
             <Text style={styles.scoreValue}>{playerScore}</Text>
           </View>
 
@@ -726,7 +706,9 @@ export default function GameScreen() {
 
           <View style={styles.scoreBox}>
             <View style={[styles.penIndicator, { backgroundColor: aiPen.color }]} />
-            <Text style={styles.scoreName}>{gameMode === 'local-multiplayer' ? 'PLAYER 2' : 'AI'}</Text>
+            <Text style={styles.scoreName}>
+              {gameMode === 'local-multiplayer' ? 'PLAYER 2' : (gameMode === 'online-multiplayer' ? (socketService.isPlayer1 ? 'OPPONENT' : 'YOU') : 'AI')}
+            </Text>
             <Text style={styles.scoreValue}>{aiScore}</Text>
           </View>
         </View>

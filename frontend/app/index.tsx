@@ -91,6 +91,22 @@ export default function HomeScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
+            style={styles.playButton}
+            onPress={() => router.push('/online-lobby')}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={['#22C55E', '#16A34A']}
+              style={styles.playButtonGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <Ionicons name="globe-outline" size={22} color="#FFFFFF" />
+              <Text style={styles.playButtonText}>ONLINE MATCH</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity
             style={styles.menuButton}
             onPress={() => router.push('/how-to-play')}
             activeOpacity={0.7}
